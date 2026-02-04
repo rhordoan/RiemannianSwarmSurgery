@@ -228,9 +228,8 @@ class RSSOptimizer:
                 stagnation_detected = (fitness_var < 1.0) or (fitness_std < fitness_mean * 0.01)
                 
                 if stagnation_detected and fitness_mean > 50.0:
-                    # Reduced print for performance
-                    if self.generation % 100 == 0:
-                        print(f"  [STAGNATION] Gen {self.generation}: Mean={fitness_mean:.2f}")
+                    # Print removed for performance
+                    pass
                     
                     # --- THE LAST STAND ---
                     # Before geometric detonation, check if the best agent is close to a breakthrough.
@@ -249,8 +248,9 @@ class RSSOptimizer:
                         if val < best_val:
                             best_agent = candidate
                             best_val = val
-                            if best_val < 50.0: 
-                                print(f"  [LAST STAND] Breached Inner Basin! Error: {best_val:.4e}")
+                            if best_val < 50.0:
+                                # Print removed for performance
+                                # print(f"  [LAST STAND] Breached Inner Basin! Error: {best_val:.4e}")
                                 self.best_found = min(self.best_found, best_val)
                                 self.best_solution = best_agent.copy()
                                 sp['pop'][best_idx] = best_agent

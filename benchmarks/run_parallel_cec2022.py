@@ -220,8 +220,13 @@ if __name__ == "__main__":
     # Configuration
     FUNC_NUM = 12      # CEC 2022 F12 (Composition Function 4 - Russian Doll)
     DIM = 20           # 20 dimensions
-    MAX_FE = 30000     # 30,000 function evaluations
+    MAX_FE = 200000    # 200,000 function evaluations (CEC 2022 standard budget)
     NUM_TRIALS = 30    # 30 independent runs
+    
+    print(f"\n{'='*70}")
+    print(f"⚠️  CEC 2022 STANDARD BUDGET: {MAX_FE:,} FEs")
+    print(f"   (Previous 30k was too low for convergence)")
+    print(f"{'='*70}\n")
     
     # Run benchmark
     results, stats = run_parallel_benchmark(
