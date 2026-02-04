@@ -20,7 +20,7 @@ from src.sheaf_archive import SheafArchive, TabuArchive
 
 class RiemannianSwarm:
     # CHANGE: k=3 (Fragile), learning_rate=2.5 (Explosive)
-    def __init__(self, agents: np.ndarray, dimension: int, k_neighbors: int = 3, learning_rate: float = 2.5, archive_type: str = 'sheaf'):
+    def __init__(self, agents: np.ndarray, dimension: int, k_neighbors: int = 3, learning_rate: float = 2.5, archive_type: str = 'sheaf', multiscale: bool = True):
         """
         initializes the Riemannian Swarm Optimizer.
         
@@ -30,12 +30,14 @@ class RiemannianSwarm:
             k_neighbors (int): Number of neighbors for k-NN graph.
             learning_rate (float): Step size (lambda) for Ricci flow.
             archive_type (str): 'sheaf', 'tabu', or 'none'.
+            multiscale (bool): Use multi-scale curvature estimation.
         """
         self.swarm = agents
         self.dimension = dimension
         self.k = k_neighbors
         self.learning_rate = learning_rate
         self.archive_type = archive_type
+        self.multiscale = multiscale
         
         if archive_type == 'sheaf':
             self.archive = SheafArchive()
@@ -50,6 +52,10 @@ class RiemannianSwarm:
         # This prevents the graph from "healing" itself in subsequent generations
         # Keys are (min_node_id, max_node_id) tuples to ensure consistent ordering
         self.surgically_cut_edges = set()
+        
+        # MULTISCALE: Store graphs at multiple scales for robust curvature
+        self.multiscale_graphs = {}
+        self.multiscale_kappas = {}
         
     def build_knn_graph(self, points: np.ndarray) -> nx.Graph:
 
@@ -95,15 +101,12 @@ class RiemannianSwarm:
         # 1. Build k-NN Graph
         self.graph = self.build_knn_graph(self.swarm)
         
-        # 2. Compute Forman-Ricci Curvature
-        # NOTE: GraphRicciCurvature library returns zeros on our graph structure.
-        # Using manual implementation for now.
-        # if FormanRicci is not None:
-        #     orc = FormanRicci(self.graph)
-        #     orc.compute_ricci_curvature()
-        #     self.graph = orc.G
-        # else:
-        self.compute_manual_curvature()
+        # 2. Compute Forman-Ricci Curvature (Multi-scale if enabled)
+        if self.multiscale:
+            self.build_multiscale_graphs(self.swarm)
+            self.compute_multiscale_curvature()
+        else:
+            self.compute_manual_curvature()
         
         # DEBUG: Print curvature stats less frequently
         kappas = [d.get('ricciCurvature', 0) for u, v, d in self.graph.edges(data=True)]
@@ -146,23 +149,16 @@ class RiemannianSwarm:
         G = self.graph
         # Pre-fetch weights to avoid dictionary lookups in loop
         edge_weights = nx.get_edge_attributes(G, 'weight')
-        # Weighted degree if needed, or just degree
-        # node_degrees = dict(G.degree(weight='weight')) 
         
         curvatures = {}
         
         # Iterate edges (this loop is inevitable without adjacency matrix ops)
         for (u, v), w_e in edge_weights.items():
-            # Approx 1: Unweighted combinatorial (Fastest)
-            # F(e) = 4 - deg(u) - deg(v) 
-            # f_e = 4 - G.degree[u] - G.degree[v]
-            
             # Approx 2: Weighted (Your implementation, optimized)
             sum_u = 0.0
             sum_v = 0.0
             
             # Use G[u] iterator which is faster than G.neighbors(u)
-            # We still loop, but we minimize attribute access
             for nbr, attr in G[u].items():
                 if nbr != v:
                     sum_u += np.sqrt(w_e / attr['weight'])
@@ -174,17 +170,83 @@ class RiemannianSwarm:
             f_e = 2.0 - sum_u - sum_v
             
             # AFRC (Triangles)
-            # nx.common_neighbors returns an iterator. Converting to list is O(k)
-            # Optimization: Use set intersection on neighbors if k is large, 
-            # but for k=10, list(common_neighbors) is actually fine.
-            # Using set intersection for slight speedup on common lookups
-            # (though nx.common_neighbors is already optimized)
             tris = len(list(nx.common_neighbors(G, u, v)))
             f_e += 3.0 * tris
             
             curvatures[(u, v)] = f_e
 
         nx.set_edge_attributes(G, curvatures, 'ricciCurvature')
+    
+    def build_multiscale_graphs(self, points: np.ndarray, scales: list = None):
+        """
+        Build k-NN graphs at multiple scales for robust curvature estimation.
+        Helps with high-frequency landscapes like Rastrigin (F09).
+        """
+        if scales is None:
+            scales = [3, 5, 10]  # Small, medium, large neighborhoods
+        
+        self.multiscale_graphs = {}
+        for k in scales:
+            k_adj = min(k, len(points) - 1)
+            if k_adj > 0:
+                # Temporarily set k for build
+                orig_k = self.k
+                self.k = k_adj
+                self.multiscale_graphs[k] = self.build_knn_graph(points)
+                self.k = orig_k
+    
+    def compute_multiscale_curvature(self):
+        """
+        Compute curvature at multiple scales and combine weighted by scale.
+        More robust for high-frequency landscapes.
+        """
+        if not self.multiscale or not self.multiscale_graphs:
+            self.compute_manual_curvature()
+            return
+        
+        # Compute curvature for each scale
+        all_curvatures = {}
+        weights = {3: 0.5, 5: 0.3, 10: 0.2}  # Emphasize local structure
+        
+        for k, G in self.multiscale_graphs.items():
+            edge_weights = nx.get_edge_attributes(G, 'weight')
+            curvatures = {}
+            
+            for (u, v), w_e in edge_weights.items():
+                sum_u = 0.0
+                sum_v = 0.0
+                
+                for nbr, attr in G[u].items():
+                    if nbr != v:
+                        sum_u += np.sqrt(w_e / attr['weight'])
+                
+                for nbr, attr in G[v].items():
+                    if nbr != u:
+                        sum_v += np.sqrt(w_e / attr['weight'])
+                
+                f_e = 2.0 - sum_u - sum_v
+                tris = len(list(nx.common_neighbors(G, u, v)))
+                f_e += 3.0 * tris
+                
+                key = (min(u, v), max(u, v))
+                if key not in all_curvatures:
+                    all_curvatures[key] = {}
+                all_curvatures[key][k] = f_e
+        
+        # Combine curvatures weighted by scale
+        final_curvatures = {}
+        for edge, kappas in all_curvatures.items():
+            combined = 0.0
+            total_weight = 0.0
+            for k, kappa in kappas.items():
+                w = weights.get(k, 0.1)
+                combined += kappa * w
+                total_weight += w
+            if total_weight > 0:
+                final_curvatures[edge] = combined / total_weight
+        
+        # Apply to main graph
+        nx.set_edge_attributes(self.graph, final_curvatures, 'ricciCurvature')
 
 
         

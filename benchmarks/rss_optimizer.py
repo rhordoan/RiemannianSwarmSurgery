@@ -3,6 +3,20 @@ import copy
 import networkx as nx
 from src.riemannian_swarm import RiemannianSwarm
 
+# Optional CMA-ES for Hunter Mode hybrid
+try:
+    import cma
+    CMA_AVAILABLE = True
+except ImportError:
+    CMA_AVAILABLE = False
+
+# Optional for adaptive strategy
+try:
+    from scipy import stats
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+
 class RSSOptimizer:
     def __init__(self, problem, pop_size=50, dim=10, max_fe=10000, archive_type='sheaf'):
         self.problem = problem
@@ -77,6 +91,52 @@ class RSSOptimizer:
             
             # --- STRATEGY SWITCHING ---
             if is_hunter_squad:
+                # PHASE 1 ENHANCEMENT: CMA-ES Hybrid for Hunter Mode
+                # Run CMA-ES once per generation for small populations
+                if CMA_AVAILABLE and len(pop) >= 4 and len(new_pop) == 0:
+                    try:
+                        es = cma.CMAEvolutionStrategy(
+                            best_agent, 
+                            0.3, 
+                            {'verbose': -9, 'verb_log': 0, 'verb_disp': 0, 'maxiter': 5}
+                        )
+                        # Run for 5 iterations
+                        for _ in range(5):
+                            if self.fe_count >= self.max_fe:
+                                break
+                            solutions = es.ask()
+                            fitnesses = [self.problem.evaluate(x) for x in solutions]
+                            self.fe_count += len(solutions)
+                            es.tell(solutions, fitnesses)
+                            
+                            # Update best
+                            best_cma_idx = np.argmin(fitnesses)
+                            if fitnesses[best_cma_idx] < self.best_found:
+                                self.best_found = fitnesses[best_cma_idx]
+                                self.best_solution = solutions[best_cma_idx].copy()
+                        
+                        # Generate new population from CMA-ES
+                        new_solutions = es.ask(len(pop))
+                        for sol in new_solutions:
+                            sol_clipped = np.clip(sol, self.problem.bounds[0], self.problem.bounds[1])
+                            new_pop.append(sol_clipped)
+                            new_fitness.append(self.problem.evaluate(sol_clipped))
+                            self.fe_count += 1
+                        
+                        # Apply elitism: keep best individual
+                        best_idx = np.argmin(new_fitness)
+                        if self.best_found < new_fitness[best_idx]:
+                            worst_idx = np.argmax(new_fitness)
+                            new_pop[worst_idx] = self.best_solution.copy()
+                            new_fitness[worst_idx] = self.best_found
+                        
+                        sub_pop_dict['pop'] = np.array(new_pop)
+                        sub_pop_dict['fitness'] = np.array(new_fitness)
+                        rss_engine.swarm = sub_pop_dict['pop']
+                        return
+                    except:
+                        pass  # Fallback to DE if CMA fails
+                
                 # STRATEGY: DE/best/1/bin with Low F (Drilling)
                 F_hunt = 0.2  # Fine tuning
                 # Need 2 random agents
