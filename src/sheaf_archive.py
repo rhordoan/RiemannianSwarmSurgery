@@ -79,8 +79,13 @@ class SheafArchive(ArchiveBase):
         for ghost in self.ghosts:
             dist = np.linalg.norm(agent_pos - ghost['centroid'])
             
+            # CHANGE: Reduced buffer from 1.2 to 0.9
+            # We want to block the CENTER of the trap, but allow grazing the edges
+            # because the next "Russian Doll" entrance is often on the edge.
+            effective_radius = ghost['radius'] * 0.9 
+            
             # Restriction condition: Are we in the support of this section?
-            if dist < ghost['radius'] * 1.2:
+            if dist < effective_radius:
                 # Consistency Error: In Sheaf theory, this is the Laplacian energy.
                 # If we are effectively in the same state that failed, repulsion is high.
                 # For this implementation, we treat 'being inside the radius' as 
@@ -93,7 +98,7 @@ class SheafArchive(ArchiveBase):
                 # We return a multiplier that will divide the step size or increase distance.
                 
                 # Repulsion strength
-                local_strength = (1.0 - (dist / (ghost['radius'] * 1.2))) * 1000.0 # Massive penalty
+                local_strength = (1.0 - (dist / effective_radius)) * 1000.0 # Massive penalty
                 penalty += max(0, local_strength)
                 
         return penalty

@@ -15,11 +15,11 @@ class RussianDollFunction:
     Nested basins with conflicting curvature.
     
     Structure:
-    - Outer: Wide, deceptive Schwefel-like or Sphere
-    - Middle: Rotated Griewank (Ridges)
-    - Inner: Rastrigin (Egg carton)
+    - Inner: Global optimum at origin (Sphere-like)
+    - Barrier: Ring-shaped ridge creating a "moat"
+    - Outer: Deceptive basin pulling towards local optimum
     
-    For simplicity, we blend them radially.
+    Uses smooth blending to ensure gradients exist everywhere.
     """
     def __init__(self, dimension=10):
         self.dim = dimension
@@ -28,19 +28,29 @@ class RussianDollFunction:
     def evaluate(self, x):
         r = np.linalg.norm(x)
         
-        # Inner Basin (Radius < 5): Rastrigin (Global Optimum at 0)
-        if r < 5.0:
-            return rastrigin(x)
+        # Inner Basin: Global optimum at 0
+        # f_inner(x) = ||x||^2 (Sphere)
+        f_inner = np.sum(x**2)
         
-        # Neck/Barrier (5 < Radius < 20): High wall / Ridge
-        elif r < 15.0:
-            # Create a ridge that strictly increases then decreases?
-            # Or just a high value chaos.
-            return 200.0 + griewank(x) * 10
-            
-        # Outer Basin (Radius > 20): Sphere/Schwefel pointing to local optima diverse from 0
-        else:
-            # Bias towards a deceptive local optimum at (50, 50, ...)
-            deceptive_center = np.ones_like(x) * 50
-            dist_deceptive = np.linalg.norm(x - deceptive_center)
-            return 100.0 + dist_deceptive**2 * 0.1
+        # Barrier: Ring-shaped ridge at radius ~10
+        # Gaussian bump centered at r=10 with width 5
+        barrier_center = 10.0
+        barrier_width = 5.0
+        barrier_height = 500.0
+        f_barrier = barrier_height * np.exp(-((r - barrier_center)**2) / (2 * barrier_width**2))
+        
+        # Outer Basin: Deceptive attractor at (30, 30, ..., 30)
+        deceptive_center = np.ones_like(x) * 30.0
+        f_outer = 100.0 + 0.5 * np.sum((x - deceptive_center)**2) / self.dim
+        
+        # Smooth blending using sigmoid weights based on radius
+        # Inner dominates when r < 5, outer dominates when r > 20
+        w_inner = 1.0 / (1.0 + np.exp((r - 5) / 2))  # Sigmoid centered at r=5
+        w_outer = 1.0 / (1.0 + np.exp(-(r - 20) / 2))  # Sigmoid centered at r=20
+        w_barrier = 1.0 - w_inner - w_outer
+        w_barrier = max(0, w_barrier)  # Clamp
+        
+        # Weighted combination
+        f = w_inner * f_inner + w_barrier * f_barrier + w_outer * f_outer
+        
+        return f

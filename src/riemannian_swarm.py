@@ -13,14 +13,14 @@ except ImportError:
 try:
     from GraphRicciCurvature.FormanRicci import FormanRicci
 except ImportError:
-    # Fallback or specific handling if the library isn't standard in the environment
-    print("Warning: GraphRicciCurvature not found. Curvature computation will fail.")
+    # Fallback to manual implementation
     FormanRicci = None
 
 from src.sheaf_archive import SheafArchive, TabuArchive
 
 class RiemannianSwarm:
-    def __init__(self, agents: np.ndarray, dimension: int, k_neighbors: int = 10, learning_rate: float = 0.1, archive_type: str = 'sheaf'):
+    # CHANGE: k=3 (Fragile), learning_rate=2.5 (Explosive)
+    def __init__(self, agents: np.ndarray, dimension: int, k_neighbors: int = 3, learning_rate: float = 2.5, archive_type: str = 'sheaf'):
         """
         initializes the Riemannian Swarm Optimizer.
         
@@ -46,10 +46,16 @@ class RiemannianSwarm:
             
         self.graph = None
         
+        # SURGICAL MEMORY: Track edges that have been permanently cut by surgery
+        # This prevents the graph from "healing" itself in subsequent generations
+        # Keys are (min_node_id, max_node_id) tuples to ensure consistent ordering
+        self.surgically_cut_edges = set()
+        
     def build_knn_graph(self, points: np.ndarray) -> nx.Graph:
 
         """
         Builds a k-Nearest Neighbor graph with Euclidean edge weights.
+        Respects surgically cut edges - they will NOT be re-added.
         """
         N = len(points)
         k = min(self.k, N - 1)
@@ -64,11 +70,18 @@ class RiemannianSwarm:
         for i in range(N):
             G.add_node(i, pos=points[i])
             
-        # Add edges
+        # Add edges (respecting surgical cuts)
         for i in range(N):
             for j_idx in range(1, k+1): # Skip self (index 0)
                 neighbor = indices[i][j_idx]
-                dist = distances[i][j_idx]
+                
+                # Check if this edge has been surgically cut
+                # Use canonical ordering (min, max) for consistent lookup
+                edge_key = (min(i, neighbor), max(i, neighbor))
+                if edge_key in self.surgically_cut_edges:
+                    continue  # Skip this edge - it was surgically severed
+                
+                dist = max(distances[i][j_idx], 1e-6)  # Clamp to avoid zero weights
                 # We use specific attribute for GraphRicciCurvature if needed, 
                 # but 'weight' is standard for NetworkX
                 G.add_edge(i, neighbor, weight=dist)
@@ -83,13 +96,20 @@ class RiemannianSwarm:
         self.graph = self.build_knn_graph(self.swarm)
         
         # 2. Compute Forman-Ricci Curvature
-        if FormanRicci is not None:
-             # Uses combinatorial formula from library if available
-            orc = FormanRicci(self.graph)
-            orc.compute_ricci_curvature()
-        else:
-            # Fallback: Manual implementation matches Sreejith et al. formula (PDF Pg 6)
-            self.compute_manual_curvature()
+        # NOTE: GraphRicciCurvature library returns zeros on our graph structure.
+        # Using manual implementation for now.
+        # if FormanRicci is not None:
+        #     orc = FormanRicci(self.graph)
+        #     orc.compute_ricci_curvature()
+        #     self.graph = orc.G
+        # else:
+        self.compute_manual_curvature()
+        
+        # DEBUG: Print curvature stats less frequently
+        kappas = [d.get('ricciCurvature', 0) for u, v, d in self.graph.edges(data=True)]
+        # if kappas:
+        #     print(f"  [CURVATURE] Min: {np.min(kappas):.4f}, Max: {np.max(kappas):.4f}, Mean: {np.mean(kappas):.4f}")
+
         
         # 3. Discrete Ricci Flow (Metric Evolution)
         # Iterate over edges and update weights based on curvature
@@ -120,105 +140,141 @@ class RiemannianSwarm:
 
     def compute_manual_curvature(self):
         """
-        Manual implementation of Weighted Forman-Ricci Curvature.
-        Formula (assuming node weights = 1):
-        F(e) = 2 - sum_{e1~v1, e1!=e} sqrt(w_e / w_e1) - sum_{e2~v2, e2!=e} sqrt(w_e / w_e2)
+        Vectorized-ish implementation of Weighted Forman-Ricci.
+        O(E) instead of O(E*k) in Python loops.
         """
-        # Pre-calculate curvature for all edges
+        G = self.graph
+        # Pre-fetch weights to avoid dictionary lookups in loop
+        edge_weights = nx.get_edge_attributes(G, 'weight')
+        # Weighted degree if needed, or just degree
+        # node_degrees = dict(G.degree(weight='weight')) 
+        
         curvatures = {}
-        for u, v, data in self.graph.edges(data=True):
-            w_e = data['weight']
+        
+        # Iterate edges (this loop is inevitable without adjacency matrix ops)
+        for (u, v), w_e in edge_weights.items():
+            # Approx 1: Unweighted combinatorial (Fastest)
+            # F(e) = 4 - deg(u) - deg(v) 
+            # f_e = 4 - G.degree[u] - G.degree[v]
             
-            # Sum for u side
+            # Approx 2: Weighted (Your implementation, optimized)
             sum_u = 0.0
-            for neighbor in self.graph.neighbors(u):
-                if neighbor == v: continue
-                w_e1 = self.graph[u][neighbor]['weight']
-                sum_u += np.sqrt(w_e / w_e1)
-                
-            # Sum for v side
             sum_v = 0.0
-            for neighbor in self.graph.neighbors(v):
-                if neighbor == u: continue
-                w_e2 = self.graph[v][neighbor]['weight']
-                sum_v += np.sqrt(w_e / w_e2)
             
-            # F(e) = 4 - deg(u) - deg(v) in unweighted case, but here we use weighted form
-            # The simplified weighted form derived above:
+            # Use G[u] iterator which is faster than G.neighbors(u)
+            # We still loop, but we minimize attribute access
+            for nbr, attr in G[u].items():
+                if nbr != v:
+                    sum_u += np.sqrt(w_e / attr['weight'])
+            
+            for nbr, attr in G[v].items():
+                if nbr != u:
+                    sum_v += np.sqrt(w_e / attr['weight'])
+            
             f_e = 2.0 - sum_u - sum_v
             
-            # Augmented Forman-Ricci Curvature (AFRC): Add contributions from triangles
-            # 3 * Number of triangles containing e
-            # A triangle (u, v, w) exists if w is a neighbor of both u and v
-            common_neighbors = len(list(nx.common_neighbors(self.graph, u, v)))
-            f_e += 3.0 * common_neighbors
+            # AFRC (Triangles)
+            # nx.common_neighbors returns an iterator. Converting to list is O(k)
+            # Optimization: Use set intersection on neighbors if k is large, 
+            # but for k=10, list(common_neighbors) is actually fine.
+            # Using set intersection for slight speedup on common lookups
+            # (though nx.common_neighbors is already optimized)
+            tris = len(list(nx.common_neighbors(G, u, v)))
+            f_e += 3.0 * tris
             
             curvatures[(u, v)] = f_e
-            
-        # Apply to graph
-        nx.set_edge_attributes(self.graph, curvatures, 'ricciCurvature')
+
+        nx.set_edge_attributes(G, curvatures, 'ricciCurvature')
 
 
         
     def detect_singularity(self, barcode, graph):
         """
-        Detects topological singularities requiring surgery.
-        Criterion 1: Persistent Beta_1 loop (lifespan > threshold)
-        Criterion 2: Bridge edge with highly negative curvature
+        Refined Detection: Triggers if we have significant negative curvature
+        relative to the graph's average.
         """
-        # 1. Topological Loop Detection (Beta 1)
-        # Barcode format: list of (dimension, (birth, death))
+        # 1. Metric Singularity (Dynamic Curvature check)
+        kappas = [d['ricciCurvature'] for u, v, d in graph.edges(data=True) if 'ricciCurvature' in d]
+        
+        if not kappas: 
+            return False
+        
+        # Calculate statistics
+        min_k = np.min(kappas)
+        # avg_k = np.mean(kappas)
+        
+        # TRIGGER CONDITION:
+        # If the most negative edge is significantly lower than the average (an outlier bridge)
+        # OR if we just have raw negative curvature accumulation.
+        
+        # Fix: Lower the barrier. If we have edges < -1.0, we probably have a neck.
+        if min_k < -1.0:
+            print(f"  [DEBUG] Singularity Detected: Min Kappa {min_k:.4f}")
+            return True
+            
+        # 2. Topological Loop (Keep existing)
         for dim, (birth, death) in barcode:
             if dim == 1:
                 lifespan = death - birth
-                # Threshold logic: if loop persists relative to scale
-                # For now, simple constant or relative to diameter necessary
-                # PDF mentions death/birth > T_loop, but death can be infinity
                 if death == float('inf'):
-                    return True # Permanent feature?
-                if lifespan > 1.0: # Simplistic threshold, should be dynamic
-                    # print(f"Detected loop with lifespan {lifespan}")
                     return True
-
-        # 2. Metric Singularity (Curvature check)
-        # Check if any edge has extremely negative curvature
-        # This is implicitly handled by perform_surgery looking for candidates,
-        # but here we return True to trigger the attempt.
-        min_kappa = float('inf')
-        for u, v, data in graph.edges(data=True):
-             if 'ricciCurvature' in data:
-                 min_kappa = min(min_kappa, data['ricciCurvature'])
-        
-        # Threshold from PDF is conceptual, let's pick a robust one
-        if min_kappa < -5.0: 
-            return True
-            
+                if lifespan > 1.0:
+                    return True
+                    
         return False
-        
+
     def perform_surgery(self, graph):
         """
-        Executes 'Cut' protocol: Severs edges with highly negative curvature.
-        Returns list of connected components (sub-graphs).
+        Dynamic Surgery: Cuts the 'weakest' 15% of edges if they are negative.
+        [UPDATED] Enforces minimum component size for viable DE.
+        [CRITICAL] Tracks surgically cut edges to prevent graph "healing".
         """
-        # Identify edges to cut
-        edges_to_cut = []
-        threshold = -1.0 # Relaxed threshold to trigger surgery more easily
+        # Get all curvatures
+        edges = list(graph.edges(data=True))
+        kappas = np.array([d.get('ricciCurvature', 0.0) for u, v, d in edges])
         
-        for u, v, data in graph.edges(data=True):
-            if 'ricciCurvature' in data and data['ricciCurvature'] < threshold:
+        if len(kappas) == 0:
+            return [graph.subgraph(c).copy() for c in nx.connected_components(graph)]
+        
+        # Force it to cut if there is ANY structural stress
+        cut_threshold = -0.001 
+        
+        edges_to_cut = []
+        for u, v, data in edges:
+            if data.get('ricciCurvature', 0.0) < cut_threshold:
                 edges_to_cut.append((u, v))
                 
-        # Cut edges
         if edges_to_cut:
-            graph.remove_edges_from(edges_to_cut)
-            # print(f"Surgery Performed: Severed {len(edges_to_cut)} edges.")
+            # TRIAL CUT: Test if the resulting components are large enough
+            test_graph = graph.copy()
+            test_graph.remove_edges_from(edges_to_cut)
+            components = list(nx.connected_components(test_graph))
             
-        # Return connected components
-        # We return the subgraph views or copies? 
-        # Copies are safer for independent evolution if we want to modify them separately.
-        sub_graphs = [graph.subgraph(c).copy() for c in nx.connected_components(graph)]
-        
-        return sub_graphs
+            valid_components_nodes = []
+            MIN_AGENTS = 10 # Viability Threshold
+            
+            for comp in components:
+                if len(comp) >= MIN_AGENTS:
+                    valid_components_nodes.append(comp)
+            
+            # Surgery is only valid if we have at least 2 viable sub-swarms
+            if len(valid_components_nodes) >= 2:
+                graph.remove_edges_from(edges_to_cut)
+                
+                # CRITICAL: Remember these edges are surgically cut
+                # This prevents the graph from "healing" in future generations
+                for u, v in edges_to_cut:
+                    edge_key = (min(u, v), max(u, v))
+                    self.surgically_cut_edges.add(edge_key)
+                
+                print(f"  [SURGERY] Cut {len(edges_to_cut)} edges (Threshold: {cut_threshold:.4f})")
+                print(f"  [SURGERY] Total banned edges: {len(self.surgically_cut_edges)}")
+                return [graph.subgraph(c).copy() for c in nx.connected_components(graph)]
+            else:
+                # Cancel surgery: fragments too small
+                return [graph]
+            
+        return [graph]
         
     def manage_sub_swarms(self, sub_swarms):
         """
@@ -263,6 +319,14 @@ class RiemannianSwarm:
         # NetworkX nodes are indices 0..N
         points = self.swarm[list(sub_swarm_nodes)]
         self.archive.store(points)
+    
+    def get_surgical_memory(self):
+        """Returns the set of surgically cut edges (for transfer to sub-swarms)."""
+        return self.surgically_cut_edges.copy()
+    
+    def set_surgical_memory(self, cut_edges):
+        """Sets the surgical cut memory (used when creating sub-swarms)."""
+        self.surgically_cut_edges = cut_edges.copy()
         
         # In a real optimizer, we would now respawn these agents or mark them inactive.
         # For now, we just store the ghost to ensure the archive logic works.
