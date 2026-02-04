@@ -209,7 +209,8 @@ class RiemannianSwarm:
         
         # Fix: Lower the barrier. If we have edges < -1.0, we probably have a neck.
         if min_k < -1.0:
-            print(f"  [DEBUG] Singularity Detected: Min Kappa {min_k:.4f}")
+            # Reduced print for performance
+            # print(f"  [DEBUG] Singularity Detected: Min Kappa {min_k:.4f}")
             return True
             
         # 2. Topological Loop (Keep existing)
@@ -267,8 +268,9 @@ class RiemannianSwarm:
                     edge_key = (min(u, v), max(u, v))
                     self.surgically_cut_edges.add(edge_key)
                 
-                print(f"  [SURGERY] Cut {len(edges_to_cut)} edges (Threshold: {cut_threshold:.4f})")
-                print(f"  [SURGERY] Total banned edges: {len(self.surgically_cut_edges)}")
+                # Reduced print for performance
+                # print(f"  [SURGERY] Cut {len(edges_to_cut)} edges (Threshold: {cut_threshold:.4f})")
+                # print(f"  [SURGERY] Total banned edges: {len(self.surgically_cut_edges)}")
                 return [graph.subgraph(c).copy() for c in nx.connected_components(graph)]
             else:
                 # Cancel surgery: fragments too small
