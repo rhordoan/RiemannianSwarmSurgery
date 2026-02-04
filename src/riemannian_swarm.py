@@ -114,9 +114,9 @@ class RiemannianSwarm:
             barcode = simplex_tree.persistence()
             
             # 5. Surgery Check (The "Cut")
-            # if self.detect_singularity(barcode, self.graph):
-            #     sub_swarms = self.perform_surgery(self.graph)
-            #     self.manage_sub_swarms(sub_swarms)
+            if self.detect_singularity(barcode, self.graph):
+                sub_swarms = self.perform_surgery(self.graph)
+                self.manage_sub_swarms(sub_swarms)
 
     def compute_manual_curvature(self):
         """

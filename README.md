@@ -34,12 +34,32 @@ To prevent the swarm from cycling back into previously pruned regions, we model 
 ## 3. Goals
 The primary objective of this framework is to solve the "**Russian Doll**" traps found in the **IEEE CEC 2022 Composition Functions (F11 & F12)**, where standard state-of-the-art algorithms (like L-SHADE variants and CMA-ES) stagnate due to inability to handle conflicting curvature signals between nested basins.
 
-## 4. Architecture
-The implementation aims for "A*" reproducibility and scalability:
-*   **Language**: Python with C++ backends for heavy lifting.
-*   **Graph/Metric**: `NetworkX`
-*   **Topology**: `Gudhi` (Sparse Rips complexes)
-*   **Curvature**: `GraphRicciCurvature` (Forman-Ricci)
+## 4. Usage
 
----
-*Note: This repository is currently under active research and development.*
+### Installation
+```bash
+pip install -r requirements.txt
+# Optional: Install fast C++ curvature library
+# pip install GraphRicciCurvature
+```
+
+### Running the Optimizer
+```python
+from benchmarks.rss_optimizer import RSSOptimizer
+from benchmarks.synthetic_functions import RussianDollFunction
+
+problem = RussianDollFunction(dimension=10)
+opt = RSSOptimizer(problem, pop_size=30, dim=10, max_fe=20000, archive_type='sheaf')
+history = opt.run()
+```
+
+### Reproducing Benchmark
+```bash
+python benchmarks/run_benchmark.py
+```
+Results will be saved to `results/convergence_d10.png`.
+
+## 5. Preliminary Results (Synthetic Russian Doll)
+RSS-Sheaf demonstrates robust convergence behavior compared to baseline methods. The topological surgery mechanism correctly identifies and severs connections when the swarm becomes entangled in the "Russian Doll" nested basins, preventing the cyclic stagnation observed in standard CMA-ES.
+
+## 6. Architecture
