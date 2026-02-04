@@ -1,0 +1,7 @@
+numpy
+networkx
+gudhi
+GraphRicciCurvature
+matplotlib
+scipy
+mealpy
