@@ -152,13 +152,94 @@ class RiemannianSwarm:
 
         
     def detect_singularity(self, barcode, graph):
-        # Stub
+        """
+        Detects topological singularities requiring surgery.
+        Criterion 1: Persistent Beta_1 loop (lifespan > threshold)
+        Criterion 2: Bridge edge with highly negative curvature
+        """
+        # 1. Topological Loop Detection (Beta 1)
+        # Barcode format: list of (dimension, (birth, death))
+        for dim, (birth, death) in barcode:
+            if dim == 1:
+                lifespan = death - birth
+                # Threshold logic: if loop persists relative to scale
+                # For now, simple constant or relative to diameter necessary
+                # PDF mentions death/birth > T_loop, but death can be infinity
+                if death == float('inf'):
+                    return True # Permanent feature?
+                if lifespan > 1.0: # Simplistic threshold, should be dynamic
+                    # print(f"Detected loop with lifespan {lifespan}")
+                    return True
+
+        # 2. Metric Singularity (Curvature check)
+        # Check if any edge has extremely negative curvature
+        # This is implicitly handled by perform_surgery looking for candidates,
+        # but here we return True to trigger the attempt.
+        min_kappa = float('inf')
+        for u, v, data in graph.edges(data=True):
+             if 'ricciCurvature' in data:
+                 min_kappa = min(min_kappa, data['ricciCurvature'])
+        
+        # Threshold from PDF is conceptual, let's pick a robust one
+        if min_kappa < -5.0: 
+            return True
+            
         return False
         
     def perform_surgery(self, graph):
-        # Stub
-        return []
+        """
+        Executes 'Cut' protocol: Severs edges with highly negative curvature.
+        Returns list of connected components (sub-graphs).
+        """
+        # Identify edges to cut
+        edges_to_cut = []
+        threshold = -5.0 # This should be dynamic based on distribution
+        
+        for u, v, data in graph.edges(data=True):
+            if 'ricciCurvature' in data and data['ricciCurvature'] < threshold:
+                edges_to_cut.append((u, v))
+                
+        # Cut edges
+        if edges_to_cut:
+            graph.remove_edges_from(edges_to_cut)
+            # print(f"Surgery Performed: Severed {len(edges_to_cut)} edges.")
+            
+        # Return connected components
+        # We return the subgraph views or copies? 
+        # Copies are safer for independent evolution if we want to modify them separately.
+        sub_graphs = [graph.subgraph(c).copy() for c in nx.connected_components(graph)]
+        
+        return sub_graphs
         
     def manage_sub_swarms(self, sub_swarms):
-        # Stub
-        pass
+        """
+        'Cap' protocol: Re-initializes metric for sub-swarms.
+        """
+        # In this architecture, 'self.graph' represents the global state.
+        # If surgery split the graph, 'self.graph' is now disconnected.
+        # We don't necessarily need to replace self.graph with a list of graphs 
+        # unless we explicitly parallelize the loop object-oriented style.
+        # For now, we update the global graph's edge weights in the new components.
+        
+        # Re-stabilize: Reset edge weights to Euclidean distance to stop hyperbolic expansion?
+        # PDF: "Metric Re-initialization... prevents the sub-swarm from trying to cross the now-severed bridge."
+        # Basically, we just reset the weights of the *remaining* edges to their current Euclidean distance, 
+        # effectively forgetting the warped history, so they can start fresh in the basin.
+        
+        # Since self.graph is already modified (edges cut), we iterate over remaining edges.
+        
+        positions = self.swarm # Global indices mapping
+        
+        for sub_g in sub_swarms:
+            # Re-calculate weights for this component
+            for u, v in sub_g.edges():
+                # We need original indices to get positions
+                # NetworkX nodes are integers if we built it that way
+                p1 = self.swarm[u]
+                p2 = self.swarm[v]
+                dist = np.linalg.norm(p1 - p2)
+                
+                # Reset weight in the main graph
+                if self.graph.has_edge(u, v):
+                    self.graph[u][v]['weight'] = dist
+
