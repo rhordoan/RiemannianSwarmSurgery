@@ -17,10 +17,10 @@ except ImportError:
     print("Warning: GraphRicciCurvature not found. Curvature computation will fail.")
     FormanRicci = None
 
-from src.sheaf_archive import SheafArchive
+from src.sheaf_archive import SheafArchive, TabuArchive
 
 class RiemannianSwarm:
-    def __init__(self, agents: np.ndarray, dimension: int, k_neighbors: int = 10, learning_rate: float = 0.1):
+    def __init__(self, agents: np.ndarray, dimension: int, k_neighbors: int = 10, learning_rate: float = 0.1, archive_type: str = 'sheaf'):
         """
         initializes the Riemannian Swarm Optimizer.
         
@@ -29,16 +29,25 @@ class RiemannianSwarm:
             dimension (int): Dimensionality of the search space.
             k_neighbors (int): Number of neighbors for k-NN graph.
             learning_rate (float): Step size (lambda) for Ricci flow.
+            archive_type (str): 'sheaf', 'tabu', or 'none'.
         """
         self.swarm = agents
         self.dimension = dimension
         self.k = k_neighbors
         self.learning_rate = learning_rate
+        self.archive_type = archive_type
         
-        self.archive = SheafArchive()
+        if archive_type == 'sheaf':
+            self.archive = SheafArchive()
+        elif archive_type == 'tabu':
+            self.archive = TabuArchive()
+        else:
+            self.archive = None
+            
         self.graph = None
         
     def build_knn_graph(self, points: np.ndarray) -> nx.Graph:
+
         """
         Builds a k-Nearest Neighbor graph with Euclidean edge weights.
         """
@@ -239,7 +248,33 @@ class RiemannianSwarm:
                 p2 = self.swarm[v]
                 dist = np.linalg.norm(p1 - p2)
                 
-                # Reset weight in the main graph
                 if self.graph.has_edge(u, v):
                     self.graph[u][v]['weight'] = dist
+
+    def prune_sub_swarm(self, sub_swarm_nodes):
+        """
+        Archives a sub-swarm (e.g., if it converged to a poor local optimum)
+        and removes it from the active population.
+        """
+        if self.archive is None:
+            return
+            
+        # Get actual coordinates
+        # NetworkX nodes are indices 0..N
+        points = self.swarm[list(sub_swarm_nodes)]
+        self.archive.store(points)
+        
+        # In a real optimizer, we would now respawn these agents or mark them inactive.
+        # For now, we just store the ghost to ensure the archive logic works.
+        
+    def get_repulsion(self, agent_idx):
+        """
+        Calculates repulsion penalty for a specific agent based on archive.
+        """
+        if self.archive is None:
+            return 0.0
+            
+        pos = self.swarm[agent_idx]
+        return self.archive.repulsion(pos)
+
 
