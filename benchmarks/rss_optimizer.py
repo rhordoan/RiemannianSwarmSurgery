@@ -169,7 +169,9 @@ class RSSOptimizer:
             num_components = nx.number_connected_components(sp['rss'].graph) if (sp['rss'].graph and check_surgery) else 1
             
             if num_components > 1:
-                print(f"  [SPLIT @ Gen {self.generation}] Graph has {num_components} components!")
+                # Reduced print for performance
+                if self.generation % 50 == 0:
+                    print(f"  [SPLIT @ Gen {self.generation}] Graph has {num_components} components!")
                 components = list(nx.connected_components(sp['rss'].graph))
                 
                 # Keep ALL components as independent sub-populations
@@ -226,7 +228,9 @@ class RSSOptimizer:
                 stagnation_detected = (fitness_var < 1.0) or (fitness_std < fitness_mean * 0.01)
                 
                 if stagnation_detected and fitness_mean > 50.0:
-                    print(f"  [STAGNATION] Detected: Mean={fitness_mean:.2f}, Std={fitness_std:.2f}")
+                    # Reduced print for performance
+                    if self.generation % 100 == 0:
+                        print(f"  [STAGNATION] Gen {self.generation}: Mean={fitness_mean:.2f}")
                     
                     # --- THE LAST STAND ---
                     # Before geometric detonation, check if the best agent is close to a breakthrough.
@@ -263,7 +267,8 @@ class RSSOptimizer:
                     # Instead of random respawn (non-geometric), use inverse Ricci flow
                     # to explosively expand the metric, pushing agents apart
                     
-                    print(f"  [METRIC DETONATION] Triggering Big Bang Protocol...")
+                    # Reduced print for performance
+                    # print(f"  [METRIC DETONATION] Triggering Big Bang Protocol...")
                     
                     # Archive the failed region (Ghost Topology)
                     indices = list(range(len(sp['pop'])))
@@ -283,7 +288,8 @@ class RSSOptimizer:
                             expansion_factor = 1.0 + boost_lr * 10.0
                             data['weight'] *= expansion_factor
                         
-                        print(f"  [METRIC DETONATION] Space expanded by factor {expansion_factor:.2f}")
+                        # Reduced print for performance
+                        # print(f"  [METRIC DETONATION] Space expanded by factor {expansion_factor:.2f}")
                         
                         # The swarm positions remain the same, but the graph metric is now inflated
                         # This effectively makes the optimizer think agents are far apart,
@@ -365,7 +371,8 @@ class RSSOptimizer:
                         if 'CR' in sp and sp['CR'] is not None:
                             sp['CR'] = sp['CR'][keep_indices]
             
-            if self.fe_count % 1000 == 0:
+            # Reduced print for performance (every 5000 FEs instead of 1000)
+            if self.fe_count % 5000 == 0:
                 total_agents = sum(len(sp['pop']) for sp in self.sub_pops)
-                print(f"FE: {self.fe_count} | Best Error: {best:.4e} | Pop: {total_agents}")
+                print(f"FE: {self.fe_count} | Best: {best:.4e} | Pop: {total_agents}")
         return history

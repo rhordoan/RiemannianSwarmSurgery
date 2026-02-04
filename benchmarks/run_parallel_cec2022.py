@@ -133,10 +133,11 @@ def run_parallel_benchmark(
             archive_type = result['archive_type']
             results[archive_type].append(result)
             
-            # Progress update
+            # Progress update (reduced frequency for performance)
             progress = (i + 1) / total_tasks * 100
-            print(f"[{progress:5.1f}%] Trial {result['trial_id']:2d} ({archive_type:5s}): "
-                  f"Final Error = {result['final_error']:.4e}")
+            if i % 5 == 0 or i == total_tasks - 1:  # Print every 5th task + final
+                print(f"[{progress:5.1f}%] Trial {result['trial_id']:2d} ({archive_type:5s}): "
+                      f"Final Error = {result['final_error']:.4e}")
     
     print("\n" + "=" * 70)
     print("BENCHMARK COMPLETE - SUMMARY STATISTICS")
