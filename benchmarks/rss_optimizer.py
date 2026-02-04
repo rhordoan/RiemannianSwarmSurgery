@@ -103,17 +103,36 @@ class RSSOptimizer:
             sp['rss'].step()
             
             # 3. Check for Surgery
+            # 3. Check for Surgery & Pruning
             if sp['rss'].graph:
-                # Need to run singularity detection.
-                # Since 'detect_singularity' is internal to RSS but 'perform_surgery' is manual
-                # We need to expose better API or use what we have.
-                pass 
-                # For this benchmark, we assume implicit surgery handling inside RSS 
-                # or we implement the splitting logic here.
+                # Check connected components using NetworkX (since RSS manages the graph)
+                # If the graph is split (due to surgery in rss.step()), we should technically split the population.
+                # However, for this ablation, we can just detect "Stagnation" in the current component.
                 
-                # If RSS graph splits, we should split the population in the NEXT generation.
-                # Implementing full dynamic splitting is complex for this script.
-                # We will rely on Repulsion to guide them away from bad basins.
+                # Pruning Condition:
+                # If variance of population is very low (converged) AND fitness is poor (>1.0),
+                # it means we are trapped in a local optimum.
+                fitness_var = np.var(sp['fitness'])
+                fitness_mean = np.mean(sp['fitness'])
+                
+                # If converged to a bad spot (e.g. error > 10.0, var < 1e-4)
+                if fitness_var < 1e-4 and fitness_mean > 10.0:
+                    # Prune this ENTIRE sub-population
+                    # print(f"Pruning Stagnant Population: Mean Fit {fitness_mean:.2f}")
+                    
+                    # Store ghost
+                    indices = list(range(len(sp['pop'])))
+                    sp['rss'].prune_sub_swarm(indices)
+                    
+                    # Respawn Agents (Macro-Mutation / restart)
+                    # We keep the object but reset positions
+                    # In a full algorithm we might just delete the sub-pop, but here we refill it.
+                    sp['pop'] = np.random.uniform(self.problem.bounds[0], self.problem.bounds[1], (len(sp['pop']), self.dim))
+                    sp['fitness'] = np.array([self.problem.evaluate(ind) for ind in sp['pop']])
+                    self.fe_count += len(sp['pop'])
+                    
+                    # Reset RSS
+                    sp['rss'].swarm = sp['pop']
             
             # Track best
             curr_min = np.min(sp['fitness'])
