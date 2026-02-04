@@ -202,7 +202,7 @@ class RiemannianSwarm:
         """
         # Identify edges to cut
         edges_to_cut = []
-        threshold = -5.0 # This should be dynamic based on distribution
+        threshold = -1.0 # Relaxed threshold to trigger surgery more easily
         
         for u, v, data in graph.edges(data=True):
             if 'ricciCurvature' in data and data['ricciCurvature'] < threshold:

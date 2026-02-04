@@ -20,7 +20,7 @@ def run_experiment(dim=10, trials=5):
     
     for mode in modes:
         print(f"\nRunning Mode: {mode}")
-        for t in range(trials): # Reduced trials
+        for t in range(trials):
             # Seed reproducibility
             np.random.seed(t + 100)
             

@@ -93,7 +93,7 @@ class SheafArchive(ArchiveBase):
                 # We return a multiplier that will divide the step size or increase distance.
                 
                 # Repulsion strength
-                local_strength = (1.0 - (dist / (ghost['radius'] * 1.2))) * 20.0
+                local_strength = (1.0 - (dist / (ghost['radius'] * 1.2))) * 1000.0 # Massive penalty
                 penalty += max(0, local_strength)
                 
         return penalty
