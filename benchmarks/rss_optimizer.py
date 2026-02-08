@@ -31,6 +31,9 @@ class RSSOptimizer:
         self.surgery_interval = 15  # Check surgery every 15 generations (tuned)
         self.generation = 0
         
+        # ELITE: Calculate max generations for adaptive threshold
+        self.max_generations = max_fe // pop_size
+        
         # Initialize Population
         self.pop = np.random.uniform(problem.bounds[0], problem.bounds[1], (pop_size, dim))
         self.fitness = np.array([problem.evaluate(ind) for ind in self.pop])
@@ -41,8 +44,9 @@ class RSSOptimizer:
         self.best_found = self.fitness[best_idx]
         self.best_solution = self.pop[best_idx].copy()  # ELITISM: Store best solution
         
-        # Initialize RSS Engine
+        # Initialize RSS Engine (with max_generations for adaptive threshold)
         self.rss = RiemannianSwarm(self.pop, dim, archive_type=archive_type)
+        self.rss.max_generations = self.max_generations
         
         # List of sub-populations (if split)
         # Initially just one global population
@@ -137,11 +141,28 @@ class RSSOptimizer:
                     except:
                         pass  # Fallback to DE if CMA fails
                 
+        # [ELITE] TOPOLOGICAL SELECTION PROBABILITIES
+        # Agents in positive curvature regions (basins) are preferred as parents
+        kappas = np.array([rss_engine.get_agent_curvature(idx) for idx in range(len(pop))])
+        # Probabilities: higher kappa -> higher weight
+        # Use tanh/exp for stable weighting
+        probs = np.exp(np.clip(kappas, -5.0, 5.0) / 2.0)
+        selection_probs = probs / np.sum(probs)
+
+        # Iterate through population
+        for i in range(len(pop)):
+            idxs = [j for j in range(len(pop)) if j != i]
+            
+            if is_hunter_squad:
                 # STRATEGY: DE/best/1/bin with Low F (Drilling)
                 F_hunt = 0.2  # Fine tuning
-                # Need 2 random agents
+                # Need 2 random agents (weighted selection)
                 if len(idxs) >= 2:
-                    r1, r2 = pop[np.random.choice(idxs, 2, replace=False)]
+                    # Adjust selection_probs for the indices available
+                    sp_idxs = selection_probs[idxs]
+                    sp_idxs = sp_idxs / np.sum(sp_idxs)
+                    r1_idx, r2_idx = np.random.choice(idxs, 2, replace=False, p=sp_idxs)
+                    r1, r2 = pop[r1_idx], pop[r2_idx]
                     mutant = best_agent + F_hunt * (r1 - r2)
                 else:
                     mutant = pop[i] # Fallback
@@ -156,12 +177,23 @@ class RSSOptimizer:
                 else:
                     Fi = current_F[i]
                 
+                # [ELITE] CURVATURE-AWARE F SCALING
+                kappa_i = kappas[i]
+                kappa_normalized = np.clip(kappa_i, -10.0, 10.0)
+                curvature_boost = 1.0 + 0.2 * np.tanh(-kappa_normalized / 5.0)
+                Fi = Fi * curvature_boost
+                Fi = np.clip(Fi, 0.1, 1.2)
+                
                 if np.random.rand() < 0.1:
                     CRi = np.random.rand()
                 else:
                     CRi = current_CR[i]
                     
-                a, b, c = pop[np.random.choice(idxs, 3, replace=False)]
+                # Weighted parent selection
+                sp_idxs = selection_probs[idxs]
+                sp_idxs = sp_idxs / np.sum(sp_idxs)
+                a_idx, b_idx, c_idx = np.random.choice(idxs, 3, replace=False, p=sp_idxs)
+                a, b, c = pop[a_idx], pop[b_idx], pop[c_idx]
                 mutant = a + Fi * (b - c)
 
             # Boundary handling
@@ -219,14 +251,8 @@ class RSSOptimizer:
             self.evolve_sub_pop(sp)
             sp['rss'].step() # Ricci Flow
 
-            # Check Surgery (only every N generations to let curvature accumulate)
-            # AND enforce Refractory Period (Cooldown)
-            surgery_cooldown = 50
-            last_surgery = sp.get('last_surgery_gen', 0)
-            is_cooled_down = (self.generation - last_surgery) > surgery_cooldown
-            
-            check_surgery = (self.generation % self.surgery_interval == 0) and is_cooled_down
-            num_components = nx.number_connected_components(sp['rss'].graph) if (sp['rss'].graph and check_surgery) else 1
+            # Check for splits (handled internally by RSS engine with cooldown/consensus)
+            num_components = nx.number_connected_components(sp['rss'].graph) if sp['rss'].graph else 1
             
             if num_components > 1:
                 # Reduced print for performance

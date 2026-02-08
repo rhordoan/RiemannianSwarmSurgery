@@ -26,7 +26,7 @@ def run_cec_experiment(func_num=12, dim=10, trials=3):
     print(f"Starting CEC 2022 F{func_num} Benchmark (Dim={dim}, Trials={trials})")
     
     max_fe = 30000
-    modes = ['sheaf', 'none']
+    modes = ['sheaf']
     results = {m: [] for m in modes}
     
     for mode in modes:

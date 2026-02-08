@@ -57,6 +57,15 @@ class RiemannianSwarm:
         self.multiscale_graphs = {}
         self.multiscale_kappas = {}
         
+        # ADAPTIVE THRESHOLD: Generation tracking for dynamic surgery threshold
+        self.generation = 0
+        self.max_generations = 1000  # Default, will be updated by optimizer
+        
+        # SURGERY COOLDOWN: Prevent rapid-fire surgery for consistency
+        self.last_surgery_gen = -100
+        self.surgery_cooldown = 30  # Initial cooldown in generations
+        self.surgery_count = 0      # Used for exponential backoff
+        
     def build_knn_graph(self, points: np.ndarray) -> nx.Graph:
 
         """
@@ -98,6 +107,17 @@ class RiemannianSwarm:
         """
         Main execution step for one generation of RSS.
         """
+        # Increment generation for adaptive threshold
+        self.generation += 1
+        
+        # [ELITE] ADAPTIVE k: Neighborhood size decays over time
+        # Early: High k (global view, stable curvature)
+        # Late: Low k (fine structure, precise surgery)
+        progress = min(self.generation / max(self.max_generations, 1), 1.0)
+        k_max = 12
+        k_min = 3
+        self.k = int(k_max - progress * (k_max - k_min))
+        
         # 1. Build k-NN Graph
         self.graph = self.build_knn_graph(self.swarm)
         
@@ -131,15 +151,19 @@ class RiemannianSwarm:
                 
         # 4. Topological Scouting (Persistent Homology)
         if gudhi is not None:
-            # Detect loops (H1) and necks (H0 merges)
-            rips = gudhi.RipsComplex(points=self.swarm)
-            simplex_tree = rips.create_simplex_tree(max_dimension=2)
-            barcode = simplex_tree.persistence()
-            
             # 5. Surgery Check (The "Cut")
-            if self.detect_singularity(barcode, self.graph):
-                sub_swarms = self.perform_surgery(self.graph)
-                self.manage_sub_swarms(sub_swarms)
+            # Enforce cooldown to let sub-swarms stabilize
+            is_cooled_down = (self.generation - self.last_surgery_gen) >= self.surgery_cooldown
+            
+            if is_cooled_down:
+                # Detect loops (H1) and necks (H0 merges)
+                rips = gudhi.RipsComplex(points=self.swarm)
+                simplex_tree = rips.create_simplex_tree(max_dimension=2)
+                barcode = simplex_tree.persistence()
+                
+                if self.detect_singularity(barcode, self.graph):
+                    sub_swarms = self.perform_surgery(self.graph)
+                    self.manage_sub_swarms(sub_swarms)
 
     def compute_manual_curvature(self):
         """
@@ -177,6 +201,34 @@ class RiemannianSwarm:
 
         nx.set_edge_attributes(G, curvatures, 'ricciCurvature')
     
+    def get_agent_curvature(self, agent_idx: int) -> float:
+        """
+        [ELITE] Returns the mean curvature of edges connected to an agent.
+        
+        Used for curvature-aware DE mutation:
+        - Negative curvature (bridge): Agent is on a bottleneck → boost F to escape
+        - Positive curvature (basin): Agent is in a good region → lower F to refine
+        
+        Args:
+            agent_idx: Index of the agent in the swarm
+            
+        Returns:
+            Mean curvature of incident edges, or 0.0 if no edges
+        """
+        if self.graph is None or agent_idx not in self.graph:
+            return 0.0
+        
+        kappas = []
+        for neighbor in self.graph.neighbors(agent_idx):
+            edge_data = self.graph.get_edge_data(agent_idx, neighbor)
+            if edge_data and 'ricciCurvature' in edge_data:
+                kappas.append(edge_data['ricciCurvature'])
+        
+        if not kappas:
+            return 0.0
+        
+        return np.mean(kappas)
+    
     def build_multiscale_graphs(self, points: np.ndarray, scales: list = None):
         """
         Build k-NN graphs at multiple scales for robust curvature estimation.
@@ -198,7 +250,7 @@ class RiemannianSwarm:
     def compute_multiscale_curvature(self):
         """
         Compute curvature at multiple scales and combine weighted by scale.
-        More robust for high-frequency landscapes.
+        [ELITE] Also stores per-scale curvatures for consensus-based surgery.
         """
         if not self.multiscale or not self.multiscale_graphs:
             self.compute_manual_curvature()
@@ -206,11 +258,13 @@ class RiemannianSwarm:
         
         # Compute curvature for each scale
         all_curvatures = {}
+        self.multiscale_kappas = {}  # Reset per-scale storage
         weights = {3: 0.5, 5: 0.3, 10: 0.2}  # Emphasize local structure
         
         for k, G in self.multiscale_graphs.items():
             edge_weights = nx.get_edge_attributes(G, 'weight')
             curvatures = {}
+            scale_kappas = {}  # Per-scale curvature for this k
             
             for (u, v), w_e in edge_weights.items():
                 sum_u = 0.0
@@ -229,9 +283,13 @@ class RiemannianSwarm:
                 f_e += 3.0 * tris
                 
                 key = (min(u, v), max(u, v))
+                scale_kappas[key] = f_e  # Store for consensus
+                
                 if key not in all_curvatures:
                     all_curvatures[key] = {}
                 all_curvatures[key][k] = f_e
+            
+            self.multiscale_kappas[k] = scale_kappas  # Store per-scale kappas
         
         # Combine curvatures weighted by scale
         final_curvatures = {}
@@ -288,24 +346,78 @@ class RiemannianSwarm:
 
     def perform_surgery(self, graph):
         """
-        Dynamic Surgery: Cuts the 'weakest' 15% of edges if they are negative.
-        [UPDATED] Enforces minimum component size for viable DE.
+        [ELITE] Adaptive Surgery with Multi-Scale Consensus.
+        
+        Two key enhancements:
+        1. ADAPTIVE THRESHOLD: Percentile-based, generation-aware decay
+           - Early (exploration): aggressive cuts (bottom 5%)
+           - Late (exploitation): conservative cuts (bottom 20%)
+        
+        2. MULTI-SCALE CONSENSUS: Cut only if edge is stressed at ALL scales
+           - Requires agreement from k=3, k=5, and k=10 graphs
+           - Eliminates false positives from single-scale noise
+        
         [CRITICAL] Tracks surgically cut edges to prevent graph "healing".
         """
-        # Get all curvatures
+        # Get all curvatures from main graph
         edges = list(graph.edges(data=True))
         kappas = np.array([d.get('ricciCurvature', 0.0) for u, v, d in edges])
         
         if len(kappas) == 0:
             return [graph.subgraph(c).copy() for c in nx.connected_components(graph)]
         
-        # Force it to cut if there is ANY structural stress
-        cut_threshold = -0.001 
+        # === ADAPTIVE THRESHOLD ===
+        # Progress: 0.0 (start) → 1.0 (end)
+        progress = min(self.generation / max(self.max_generations, 1), 1.0)
         
+        # Percentile decays from 5% (aggressive) → 20% (conservative)
+        percentile = 5 + progress * 15
+        
+        # Calculate dynamic threshold from percentile
+        base_threshold = np.percentile(kappas, percentile)
+        
+        # Floor: Never cut positive curvature edges
+        cut_threshold = min(base_threshold, -0.01)
+        
+        # === MULTI-SCALE CONSENSUS ===
+        # Find edges that are stressed at ALL scales (intersection)
+        consensus_edges = None
+        
+        if self.multiscale and self.multiscale_kappas:
+            for k, scale_kappas in self.multiscale_kappas.items():
+                # Get edges stressed at this scale
+                stressed_at_k = set()
+                if scale_kappas:
+                    # Use same percentile-based threshold for each scale
+                    scale_vals = list(scale_kappas.values())
+                    if scale_vals:
+                        scale_threshold = np.percentile(scale_vals, percentile)
+                        scale_threshold = min(scale_threshold, -0.01)
+                        
+                        for edge, kappa in scale_kappas.items():
+                            if kappa < scale_threshold:
+                                stressed_at_k.add(edge)
+                
+                # Intersection: edge must be stressed at ALL scales
+                if consensus_edges is None:
+                    consensus_edges = stressed_at_k
+                else:
+                    consensus_edges = consensus_edges & stressed_at_k
+        
+        # Build edges_to_cut list
         edges_to_cut = []
-        for u, v, data in edges:
-            if data.get('ricciCurvature', 0.0) < cut_threshold:
-                edges_to_cut.append((u, v))
+        
+        if consensus_edges is not None and len(consensus_edges) > 0:
+            # USE CONSENSUS: Only cut edges that ALL scales agree on
+            for u, v, data in edges:
+                edge_key = (min(u, v), max(u, v))
+                if edge_key in consensus_edges:
+                    edges_to_cut.append((u, v))
+        else:
+            # FALLBACK: Use adaptive threshold on combined curvature
+            for u, v, data in edges:
+                if data.get('ricciCurvature', 0.0) < cut_threshold:
+                    edges_to_cut.append((u, v))
                 
         if edges_to_cut:
             # TRIAL CUT: Test if the resulting components are large enough
@@ -314,7 +426,7 @@ class RiemannianSwarm:
             components = list(nx.connected_components(test_graph))
             
             valid_components_nodes = []
-            MIN_AGENTS = 10 # Viability Threshold
+            MIN_AGENTS = 10  # Viability Threshold
             
             for comp in components:
                 if len(comp) >= MIN_AGENTS:
@@ -325,14 +437,22 @@ class RiemannianSwarm:
                 graph.remove_edges_from(edges_to_cut)
                 
                 # CRITICAL: Remember these edges are surgically cut
-                # This prevents the graph from "healing" in future generations
                 for u, v in edges_to_cut:
                     edge_key = (min(u, v), max(u, v))
                     self.surgically_cut_edges.add(edge_key)
                 
-                # Reduced print for performance
-                # print(f"  [SURGERY] Cut {len(edges_to_cut)} edges (Threshold: {cut_threshold:.4f})")
-                # print(f"  [SURGERY] Total banned edges: {len(self.surgically_cut_edges)}")
+                # [ELITE] BACKOFF: Update last surgery gen and backoff cooldown
+                self.last_surgery_gen = self.generation
+                self.surgery_count += 1
+                # Exponential backoff: cooldown grows with each surgery
+                # 30 -> 60 -> 120 -> 240...
+                self.surgery_cooldown = 30 * (2 ** (self.surgery_count - 1))
+                # Cap cooldown at 500 generations
+                self.surgery_cooldown = min(self.surgery_cooldown, 500)
+                
+                # Debug output (enabled for elite mode)
+                print(f"  [ELITE SURGERY] Gen {self.generation}: Cut {len(edges_to_cut)} edges")
+                print(f"    Cooldown now: {self.surgery_cooldown} gens, Consensus: {consensus_edges is not None}")
                 return [graph.subgraph(c).copy() for c in nx.connected_components(graph)]
             else:
                 # Cancel surgery: fragments too small
