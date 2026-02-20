@@ -12,10 +12,13 @@
 set -euo pipefail
 
 VENV_DIR=".venv"
+WORKERS=$(python3 -c "import os; print(max(1, os.cpu_count() - 1))" 2>/dev/null || echo 4)
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 OUT="results/tmi_quick_${TIMESTAMP}.csv"
 
 echo "=== TMI Quick Smoke Test ==="
+echo " Workers: ${WORKERS}"
+echo "============================"
 
 # venv
 if [ ! -d "${VENV_DIR}" ]; then
@@ -33,7 +36,7 @@ python benchmarks/run_tmi_benchmark.py \
     --max-fe   30000 \
     --funcs    4 8 12 \
     --variants A B C D E \
-    --no-parallel \
+    --workers  "${WORKERS}" \
     --out      "${OUT}"
 
 echo ""
