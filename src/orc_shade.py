@@ -63,13 +63,13 @@ class _CurvatureField:
     """
 
     def __init__(self, dim, k=5, orc_threshold=-0.30,
-                 update_period=3, ghost_size=60,
+                 update_period=3, ghost_size=None,
                  adaptive_threshold=False, max_fe=1):
         self.dim = dim
         self.k = k
         self.orc_threshold = orc_threshold
         self.update_period = update_period
-        self.ghost_size = ghost_size
+        self.ghost_size = ghost_size if ghost_size is not None else 18 * dim
         self.adaptive_threshold = adaptive_threshold
         self.max_fe = max_fe
         self._fe_count_ref = None
@@ -242,7 +242,7 @@ class ORCSHADE:
     ----------
     problem           : object with .evaluate(x)->float and .bounds=[lb,ub]
     dim               : problem dimensionality
-    pop_size          : initial population (default min(18*dim, 100))
+    pop_size          : initial population (default 18*dim)
     max_fe            : function evaluation budget
     pop_size_min      : minimum population after LPSR (default 4)
     H                 : success-history length (default 6)
@@ -250,7 +250,7 @@ class ORCSHADE:
     orc_threshold     : kappa below which agent explores (default -0.30)
     orc_update_period : recompute curvature every N generations (default 3)
     orc_lambda        : F-boost multiplier for saddle agents (default 0.5)
-    ghost_size        : historical reservoir capacity (default 60)
+    ghost_size        : historical reservoir capacity (default 18*dim)
     pop_schedule      : 'nonlinear' (NL-SHADE, default) or 'linear' (L-SHADE)
     max_explore_frac  : max fraction of agents that can use explore mutation (default 0.25)
     adaptive_threshold: if True, anneal threshold from -0.10 to -0.60 over the run (default False)
@@ -258,13 +258,13 @@ class ORCSHADE:
 
     def __init__(self, problem, dim, pop_size=None, max_fe=200_000,
                  pop_size_min=4, H=6, orc_k=5, orc_threshold=-0.30,
-                 orc_update_period=3, orc_lambda=0.5, ghost_size=60,
+                 orc_update_period=3, orc_lambda=0.5, ghost_size=None,
                  pop_schedule='nonlinear',
                  max_explore_frac=0.25,
                  adaptive_threshold=False):
         self.problem = problem
         self.dim = dim
-        self.pop_size_init = pop_size if pop_size is not None else min(18 * dim, 100)
+        self.pop_size_init = pop_size if pop_size is not None else 18 * dim
         self.pop_size_min = max(pop_size_min, 4)
         self.max_fe = max_fe
         self.H = H
