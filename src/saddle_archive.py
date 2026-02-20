@@ -2,58 +2,55 @@
 Topological Saddle Archive (TSA).
 
 Stores inter-basin saddle points identified by the Ollivier-Ricci Oracle and
-provides fitness-guided injection vectors for population restarts.
+provides exploration-directed injection vectors for population restarts.
 
-Design principles:
-  1. FITNESS-GUIDED DESCENT: The descent direction is derived solely from
-     fitness comparisons between two agents on opposite sides of a detected
-     saddle edge.  No gradient, Hessian, or extra function evaluations needed.
+Key design decisions (informed by D=10 CEC 2022 ablation results):
 
-     If agent u has f(u) < f(v)  (u is in the better basin):
-         descent = (x_u - x_v) / ||x_u - x_v||   (point toward the better basin)
+  1. EXPLORATION-DIRECTED DESCENT:
+     When the oracle detects a saddle edge (u, v) with f(u) < f(v), u is
+     in the known-good basin and v is on the boundary of an unexplored region.
+     The injection direction points FROM the better agent TOWARD the worse one
+     (i.e., into the unexplored basin).  This is the opposite of gradient
+     descent -- the goal is to DISCOVER new basins, not exploit known ones.
 
-  2. DEDUPLICATION: Saddles closer than min_sep in search space are treated as
-     the same boundary and not stored twice.  This prevents wasting injection
-     budget on redundant restarts.
+     descent = (x_worse - x_better) / ||x_worse - x_better||
 
-  3. CAPACITY: Only the best max_saddles saddles (by fitness of the better
-     agent) are retained.  This ensures injections are always pointed toward
-     the most promising discovered region.
+     Rationale: the optimizer already handles exploitation.  TMI's value
+     is in exploration -- placing agents where the optimizer hasn't been.
 
-  4. INJECTION SAMPLING: Injection points are placed at
-         p = center + step_size * descent + small_noise
-     and clipped to [lb, ub].  The step_size controls how far past the saddle
-     midpoint the injected agent lands -- it should be a fraction of domain width
-     (default 0.15) so the new agent enters the target basin rather than landing
-     exactly on the boundary.
+  2. ADAPTIVE STEP SIZE:
+     Each saddle stores the actual Euclidean distance between its endpoint
+     agents.  Injection step size is proportional to this distance rather
+     than a fixed fraction of the domain.  This ensures the injected agent
+     lands in the next basin (not 30 units away in a 200-unit domain when
+     the basins are only 5 units apart).
+
+  3. SADDLE EXPIRY:
+     Saddles older than max_age generations are automatically pruned.
+     Population geometry changes as the optimizer progresses; a saddle
+     detected 500 generations ago likely describes extinct structure.
+
+  4. DEDUPLICATION + CAPACITY:  Unchanged from v1.
 """
 
 import numpy as np
 
 
 class SaddleArchive:
-    """
-    Archive of topological saddle points with fitness-guided descent vectors.
-
-    Args:
-        domain_width:    Diameter of the search domain (ub - lb).  Used to
-                         set the minimum separation distance for deduplication.
-        min_sep_fraction: Saddles within this fraction of domain_width of an
-                         existing saddle are discarded as duplicates.
-        max_saddles:     Maximum number of saddles to retain (keeps best by fitness).
-    """
 
     def __init__(self,
                  domain_width: float = 200.0,
                  min_sep_fraction: float = 0.05,
-                 max_saddles: int = 30):
+                 max_saddles: int = 30,
+                 max_age: int = 300):
         self.domain_width = domain_width
         self.min_sep = domain_width * min_sep_fraction
         self.max_saddles = max_saddles
+        self.max_age = max_age
         self.saddles: list = []
 
     # ------------------------------------------------------------------
-    # Public interface
+    # Storage
     # ------------------------------------------------------------------
 
     def store_saddle(self,
@@ -61,75 +58,96 @@ class SaddleArchive:
                      x_v: np.ndarray,
                      f_u: float,
                      f_v: float,
-                     generation: int = 0) -> bool:
+                     generation: int = 0,
+                     nbr_centroid_explore: np.ndarray = None) -> bool:
         """
-        Attempt to store a new saddle point.
+        Store a detected inter-basin saddle.
 
         Args:
             x_u, x_v:   Positions of the two agents on each side of the saddle.
             f_u, f_v:   Fitness values (lower = better).
-            generation:  Current generation (for bookkeeping).
+            generation: Current generation.
+            nbr_centroid_explore: Centroid of the neighborhood on the
+                        *unexplored* (worse) side.  If provided, used as the
+                        injection target instead of the crude descent vector.
 
         Returns:
-            True if the saddle was stored, False if it was a duplicate or degenerate.
+            True if stored, False if duplicate/degenerate.
         """
         midpoint = (x_u + x_v) * 0.5
 
-        # Deduplicate: skip if too close to an existing archived saddle
         for s in self.saddles:
             if np.linalg.norm(midpoint - s['center']) < self.min_sep:
                 return False
 
-        # Fitness-guided descent: point from the worse basin toward the better one.
-        # f is a minimization objective; lower f = better.
+        # Exploration-directed: point AWAY from the better agent,
+        # INTO the unexplored basin.
         if f_u <= f_v:
-            raw_descent = x_u - x_v  # toward agent u (better basin)
+            x_better, x_worse = x_u, x_v
         else:
-            raw_descent = x_v - x_u  # toward agent v (better basin)
+            x_better, x_worse = x_v, x_u
 
-        norm = float(np.linalg.norm(raw_descent))
-        if norm < 1e-12:
+        raw = x_worse - x_better
+        edge_dist = float(np.linalg.norm(raw))
+        if edge_dist < 1e-12:
             return False
 
-        descent = raw_descent / norm
-        best_fitness = min(f_u, f_v)
+        explore_dir = raw / edge_dist
+
+        # If the caller provided the neighborhood centroid on the unexplored
+        # side, use it as a more precise injection target.
+        if nbr_centroid_explore is not None:
+            raw_nbr = nbr_centroid_explore - x_better
+            nbr_norm = float(np.linalg.norm(raw_nbr))
+            if nbr_norm > 1e-12:
+                explore_dir = raw_nbr / nbr_norm
+                edge_dist = nbr_norm
 
         self.saddles.append({
             'center': midpoint.copy(),
-            'descent': descent.copy(),
-            'best_fitness': best_fitness,
+            'explore_dir': explore_dir.copy(),
+            'edge_dist': edge_dist,
+            'best_fitness': min(f_u, f_v),
             'generation': generation,
         })
 
-        # Prune to max_saddles, keeping those with lowest (best) fitness
         if len(self.saddles) > self.max_saddles:
             self.saddles.sort(key=lambda s: s['best_fitness'])
             self.saddles = self.saddles[:self.max_saddles]
 
         return True
 
+    # ------------------------------------------------------------------
+    # Injection
+    # ------------------------------------------------------------------
+
     def get_injection_points(self,
                              n: int,
                              step_size: float,
                              lb: float,
                              ub: float,
-                             rng: np.random.Generator = None) -> np.ndarray | None:
+                             rng: np.random.Generator = None,
+                             current_gen: int = 0) -> np.ndarray | None:
         """
-        Generate n injection positions from the best archived saddles.
+        Generate n injection positions aimed at unexplored basins.
 
-        Each position is placed just past the saddle midpoint in the descent
-        direction, with small Gaussian noise for diversity.
+        Step size for each saddle is adaptive: max(step_size, 0.5 * edge_dist),
+        ensuring the injected agent clears the saddle barrier and lands in the
+        neighboring basin.  Points are spread across multiple distinct saddles
+        for diversity.
 
         Args:
-            n:          Number of injection points to generate.
-            step_size:  How far past the saddle to inject (in search-space units).
-                        Typically INJECT_STEP_SIZE_FRAC * domain_width.
-            lb, ub:     Domain bounds (scalar, applied uniformly per dimension).
-            rng:        Optional numpy Generator for reproducibility.
-
-        Returns:
-            Array of shape (n, dim), or None if archive is empty.
+            n:           Number of injection points.
+            step_size:   Base step size (fallback if edge_dist is unavailable).
+            lb, ub:      Domain bounds.
+            rng:         Optional numpy Generator.
+            current_gen: Current generation (used for age-based expiry).
         """
+        # Expire old saddles
+        if self.max_age and current_gen > 0:
+            self.saddles = [s for s in self.saddles
+                           if (current_gen - s['generation']) <= self.max_age]
+
         if not self.saddles or n <= 0:
             return None
 
@@ -137,36 +155,35 @@ class SaddleArchive:
             rng = np.random.default_rng()
 
         dim = len(self.saddles[0]['center'])
-        noise_std = max(step_size * 0.1, 1e-6)
 
-        # Best-first ordering (already sorted after pruning, but re-sort for safety)
+        # Rank by best_fitness (best first), but cycle through ALL saddles
+        # to ensure diversity.  Don't put all eggs in one basket.
         ordered = sorted(self.saddles, key=lambda s: s['best_fitness'])
 
         points = np.empty((n, dim))
         for i in range(n):
             saddle = ordered[i % len(ordered)]
+
+            # Adaptive step: at least half the edge distance, at most step_size
+            effective_step = max(step_size, 0.5 * saddle.get('edge_dist', step_size))
+
+            noise_std = max(effective_step * 0.15, 1e-6)
             noise = rng.normal(0.0, noise_std, dim)
-            pt = saddle['center'] + step_size * saddle['descent'] + noise
+
+            pt = saddle['center'] + effective_step * saddle['explore_dir'] + noise
             points[i] = np.clip(pt, lb, ub)
 
         return points
 
     def clear(self):
-        """Empty the archive."""
         self.saddles.clear()
-
-    # ------------------------------------------------------------------
-    # Properties / info
-    # ------------------------------------------------------------------
 
     @property
     def num_saddles(self) -> int:
-        """Number of archived saddle points."""
         return len(self.saddles)
 
     @property
     def best_saddle_fitness(self) -> float | None:
-        """Fitness of the best saddle endpoint discovered so far."""
         if not self.saddles:
             return None
         return min(s['best_fitness'] for s in self.saddles)

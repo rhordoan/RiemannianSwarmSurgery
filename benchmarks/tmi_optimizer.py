@@ -1,43 +1,31 @@
 """
-TMIOptimizer: Topological Manifold Injection Wrapper.
+TMIOptimizer: Topological Manifold Injection Wrapper (v2).
 
-Architecture (three clean layers):
+v2 changes (informed by D=10 CEC 2022 ablation):
 
-  Layer 1 – Base Optimizer (completely unmodified):
-    L-SHADE or NL-SHADE runs its standard generation loop. The optimizer's
-    internal state (population, archive, adaptation histories) is never touched
-    by the oracle or injection layers.
+  1. EXPLORATION DIRECTION: Injection now targets the unexplored basin (away
+     from the known-good one), not toward it.  This is the fundamental fix --
+     the optimizer already handles exploitation; TMI's value is in discovery.
 
-  Layer 2 – Riemannian Oracle (zero extra FEs):
-    After each generation, RiemannianOracle.step() is called with the current
-    population. It builds a k-NN graph and computes Ollivier-Ricci Curvature
-    for every edge. Edges with ORC < threshold (default -0.1) are flagged as
-    inter-basin saddle boundaries. Total overhead: O(N * k^3) arithmetic
-    operations per update_period generations -- negligible vs. the optimizer.
+  2. CONVERGENCE GATE: Injection is suppressed when the population has
+     effectively converged (fitness spread < epsilon or best fitness is
+     near-optimal).  This prevents TMI from hurting on unimodal functions
+     where the optimizer has already found the optimum.
 
-  Layer 3 – Topological Injection (topology-aware restart):
-    When the base optimizer stagnates (no improvement for STAGNATION_GENS
-    generations), the TMIOptimizer queries the Topological Saddle Archive for
-    the best stored saddle vector and replaces the bottom INJECTION_FRACTION of
-    the population with points displaced in the descent direction.
+  3. ADAPTIVE STEP SIZE: Each saddle stores its edge distance; injection
+     step size scales with it instead of using a fixed domain fraction.
 
-    Injection costs REAL function evaluations (n_inject per restart). This is
-    transparently reported in the paper. The claim is not "zero cost" but
-    "injected FEs are dramatically more efficient than random LHS restarts"
-    because they are deterministically aimed at the boundary between a known
-    good basin and an unexplored one.
+  4. HISTORICAL POPULATION: The oracle builds ORC on the union of the
+     current population and a reservoir of past solutions, keeping the
+     graph dense even after LPSR shrinks the population.
 
-Paper claim (falsifiable):
-    NL-SHADE + TMI reduces mean final error vs. vanilla NL-SHADE on multimodal
-    CEC 2022 functions (p < 0.05, Wilcoxon), with no significant difference
-    on unimodal functions (F1-F3), confirming topology-sensitivity.
+  5. SADDLE EXPIRY: Old saddles (>max_age generations) are pruned.
 """
 
 import sys
 import os
 import numpy as np
 
-# Allow imports from project root when running benchmarks directly
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.lshade import LSHADE
@@ -49,32 +37,8 @@ from src.saddle_archive import SaddleArchive
 class TMIOptimizer:
     """
     Topological Manifold Injection wrapper for L-SHADE / NL-SHADE.
-
-    Args:
-        problem:            Optimisation problem with .evaluate(x) and
-                            .bounds = [lb, ub].
-        base:               Base optimizer string: 'lshade' or 'nlshade'.
-        dim:                Problem dimensionality.
-        pop_size:           Initial population size (None => 18 * dim).
-        max_fe:             Total function evaluation budget.
-        k_orc:              k-NN degree for the Riemannian oracle.
-        orc_threshold:      ORC value below which an edge is a saddle (-0.1).
-        orc_update_period:  Oracle runs every this many generations (5).
-        stagnation_gens:    Gens without improvement to trigger injection.
-                            Auto-scaled to budget when None.
-        injection_fraction: Fraction of population replaced per injection (0.30).
-        inject_step_frac:   Injection displacement as fraction of domain (0.15).
-        max_saddles:        Capacity of the Saddle Archive (30).
-        max_injections:     Hard cap on total injections per run (8).
-        use_orc:            If False, skip ORC oracle and saddle archive entirely.
-                            On stagnation, inject uniformly random LHS points
-                            instead of geometry-guided ones.  Used for Variant E
-                            (ablation: random injection, same trigger and budget).
     """
 
-    # Defaults tuned on CEC 2022 D=10, max_FE=200_000
-    # Stagnation window is auto-scaled to the budget (see __init__), so these
-    # defaults only apply if stagnation_gens is explicitly passed.
     STAGNATION_GENS: int = 50
     INJECTION_FRACTION: float = 0.30
     INJECT_STEP_FRAC: float = 0.15
@@ -82,9 +46,12 @@ class TMIOptimizer:
     ORC_UPDATE_PERIOD: int = 5
     K_ORC: int = 7
     MAX_SADDLES: int = 30
-    # Upper bound on total injections per run.  Prevents burning the FE budget
-    # on repeated injections when the archive does not have useful structure yet.
     MAX_INJECTIONS: int = 8
+
+    # Convergence gate: if the fitness range across the population is
+    # below this fraction of |best_fitness|, the population is "converged"
+    # and injection is suppressed to avoid disrupting a settled optimum.
+    CONVERGENCE_EPS: float = 1e-8
 
     def __init__(self,
                  problem,
@@ -107,10 +74,6 @@ class TMIOptimizer:
         self.max_fe = max_fe
         self.base_name = base.lower()
 
-        # Stagnation window auto-scales with the budget when not overridden.
-        # Reference: 200k FEs, pop_size ~18*dim => ~1000 generations.
-        # We want ~5% of total generations as the stagnation window.
-        # For any other budget, we scale proportionally (min 20, max 200).
         if stagnation_gens is not None:
             self._stagnation_gens = stagnation_gens
         else:
@@ -127,7 +90,6 @@ class TMIOptimizer:
         self._max_injections = max_injections if max_injections is not None else self.MAX_INJECTIONS
         self._use_orc = use_orc
 
-        # Domain geometry
         lb, ub = float(problem.bounds[0]), float(problem.bounds[1])
         self.lb = lb
         self.ub = ub
@@ -139,9 +101,9 @@ class TMIOptimizer:
         elif self.base_name == 'nlshade':
             self.optimizer = NLSHADE(problem, dim, pop_size, max_fe)
         else:
-            raise ValueError(f"Unknown base optimizer '{base}'. Use 'lshade' or 'nlshade'.")
+            raise ValueError(f"Unknown base optimizer '{base}'.")
 
-        # --- Layer 2: Riemannian Oracle (skipped when use_orc=False) ---
+        # --- Layer 2: Riemannian Oracle ---
         self.oracle = RiemannianOracle(
             dim=dim,
             k=self._k_orc,
@@ -150,10 +112,16 @@ class TMIOptimizer:
             domain_width=self.domain_width,
         ) if self._use_orc else None
 
-        # --- Layer 3: Saddle Archive (skipped when use_orc=False) ---
+        # --- Layer 3: Saddle Archive ---
+        # max_age scales with total generations estimate
+        _pop_est = min(18 * dim, 100)
+        _total_gens_est = max_fe / max(_pop_est, 1)
+        _max_age = int(max(50, _total_gens_est * 0.4))
+
         self.saddle_archive = SaddleArchive(
             domain_width=self.domain_width,
             max_saddles=self._max_saddles,
+            max_age=_max_age,
         ) if self._use_orc else None
 
         # --- Internal state ---
@@ -162,15 +130,10 @@ class TMIOptimizer:
         self.best_fitness: float = self.optimizer.best_fitness
         self.best_solution: np.ndarray = self.optimizer.best_solution.copy()
 
-        # Diagnostics logged per run for paper tables
         self.injection_count: int = 0
         self.total_injection_fes: int = 0
         self.saddles_archived: int = 0
-        self._convergence: list = []  # (fe_count, best_fitness) pairs
-
-    # ------------------------------------------------------------------
-    # Properties that delegate to the base optimizer
-    # ------------------------------------------------------------------
+        self._convergence: list = []
 
     @property
     def fe_count(self) -> int:
@@ -189,20 +152,9 @@ class TMIOptimizer:
     # ------------------------------------------------------------------
 
     def step(self) -> float:
-        """
-        Execute one TMI step:
-          1. One generation of the base optimizer.
-          2. ORC oracle update (zero FEs).
-          3. Archive newly detected saddles.
-          4. Topological injection if stagnated and archive non-empty.
-
-        Returns current best fitness.
-        """
-        # 1. Base optimizer generation
         self.optimizer.step()
         self.generation += 1
 
-        # 2. Track improvement
         if self.optimizer.best_fitness < self.best_fitness - 1e-12:
             self.best_fitness = self.optimizer.best_fitness
             self.best_solution = self.optimizer.best_solution.copy()
@@ -213,65 +165,94 @@ class TMIOptimizer:
         self._convergence.append((self.fe_count, self.best_fitness))
 
         if self._use_orc:
-            # 3. Oracle step (zero FEs)
             saddles = self.oracle.step(
                 self.optimizer.pop,
                 self.optimizer.fitness,
                 self.generation,
             )
 
-            # 4. Archive detected saddles
-            for u, v in saddles:
-                N = len(self.optimizer.pop)
-                if u < N and v < N:
-                    stored = self.saddle_archive.store_saddle(
-                        self.optimizer.pop[u],
-                        self.optimizer.pop[v],
-                        float(self.optimizer.fitness[u]),
-                        float(self.optimizer.fitness[v]),
-                        self.generation,
-                    )
-                    if stored:
-                        self.saddles_archived += 1
+            if saddles:
+                aug_pop_full, aug_fit_full, _ = self.oracle._build_augmented(
+                    self.optimizer.pop, self.optimizer.fitness
+                )
+                n_aug = len(aug_pop_full)
 
-            # 5a. ORC-guided injection on stagnation
+                for s in saddles:
+                    u, v = s['u'], s['v']
+                    if u < n_aug and v < n_aug:
+                        stored = self.saddle_archive.store_saddle(
+                            aug_pop_full[u],
+                            aug_pop_full[v],
+                            float(aug_fit_full[u]),
+                            float(aug_fit_full[v]),
+                            self.generation,
+                            nbr_centroid_explore=s.get('nbr_centroid_explore'),
+                        )
+                        if stored:
+                            self.saddles_archived += 1
+
             if (self.gens_without_improvement >= self._stagnation_gens
                     and self.saddle_archive.num_saddles > 0
                     and self.fe_count < self.max_fe
-                    and self.injection_count < self._max_injections):
+                    and self.injection_count < self._max_injections
+                    and not self._is_converged()):
                 self._topological_injection()
         else:
-            # 5b. Random (LHS) injection on stagnation — Variant E ablation.
-            # Identical trigger and cap as the ORC path; only the injection
-            # *source* differs (uniform random vs geometry-guided).
             if (self.gens_without_improvement >= self._stagnation_gens
                     and self.fe_count < self.max_fe
-                    and self.injection_count < self._max_injections):
+                    and self.injection_count < self._max_injections
+                    and not self._is_converged()):
                 self._random_injection()
 
         return self.best_fitness
 
-    def _topological_injection(self):
-        """
-        Replace the bottom INJECTION_FRACTION of the population with agents
-        placed at the best archived saddle point displaced by the descent vector.
+    # ------------------------------------------------------------------
+    # Convergence gate
+    # ------------------------------------------------------------------
 
-        These replacements cost real FEs. The injection cost is logged in
-        self.total_injection_fes for transparent reporting in the paper.
+    def _is_converged(self) -> bool:
         """
+        Returns True if the population has effectively converged and
+        injection would be harmful (disrupting a settled optimum).
+
+        Two conditions (either triggers the gate):
+          1. Fitness range is near-zero relative to |best|.
+          2. Population standard deviation per dimension is tiny.
+        """
+        fit = self.optimizer.fitness
+        if len(fit) < 2:
+            return False
+
+        fit_range = float(np.max(fit) - np.min(fit))
+        scale = max(abs(self.best_fitness), 1.0)
+
+        if fit_range / scale < self.CONVERGENCE_EPS:
+            return True
+
+        pop_std = float(np.mean(np.std(self.optimizer.pop, axis=0)))
+        if pop_std < 1e-10 * self.domain_width:
+            return True
+
+        return False
+
+    # ------------------------------------------------------------------
+    # ORC-guided injection
+    # ------------------------------------------------------------------
+
+    def _topological_injection(self):
         N = len(self.optimizer.pop)
         n_inject = max(1, int(round(self._injection_fraction * N)))
-        step_size = self._inject_step_frac * self.domain_width
+        base_step = self._inject_step_frac * self.domain_width
 
-        rng = np.random.default_rng()  # thread-safe, unaffected by np.random state
+        rng = np.random.default_rng()
         points = self.saddle_archive.get_injection_points(
-            n_inject, step_size, self.lb, self.ub, rng=rng
+            n_inject, base_step, self.lb, self.ub, rng=rng,
+            current_gen=self.generation
         )
 
         if points is None:
             return
 
-        # Indices of worst (highest-fitness) agents -- they will be replaced
         sorted_idx = np.argsort(self.optimizer.fitness)[::-1]
         n_replace = min(n_inject, len(points))
         inject_idx = sorted_idx[:n_replace]
@@ -297,33 +278,24 @@ class TMIOptimizer:
         self.injection_count += 1
         self.gens_without_improvement = 0
 
-        # Sync the base optimizer's best tracking
         if self.best_fitness < self.optimizer.best_fitness:
             self.optimizer.best_fitness = self.best_fitness
             self.optimizer.best_solution = self.best_solution.copy()
 
-    def _random_injection(self):
-        """
-        Variant E ablation: replace the bottom INJECTION_FRACTION of the
-        population with agents drawn uniformly at random from [lb, ub]^dim
-        (Latin Hypercube Sampling within the domain).
+    # ------------------------------------------------------------------
+    # Random injection (Variant E ablation)
+    # ------------------------------------------------------------------
 
-        Identical trigger conditions and FE accounting as _topological_injection.
-        The *only* difference is that injection positions come from LHS rather
-        than from the ORC-guided Saddle Archive.  This isolates the contribution
-        of ORC geometry: if TMI (D) significantly outperforms random injection
-        (E), the ORC oracle is genuinely earning its place.
-        """
+    def _random_injection(self):
         N = len(self.optimizer.pop)
         n_inject = max(1, int(round(self._injection_fraction * N)))
 
-        # Latin Hypercube Sampling: stratified random in [lb, ub]^dim
         rng = np.random.default_rng()
         points = np.empty((n_inject, self.dim))
         for d in range(self.dim):
             cuts = np.linspace(self.lb, self.ub, n_inject + 1)
             points[:, d] = rng.uniform(cuts[:-1], cuts[1:])
-        rng.shuffle(points)  # shuffle rows so columns are independent
+        rng.shuffle(points)
 
         sorted_idx = np.argsort(self.optimizer.fitness)[::-1]
         inject_idx = sorted_idx[:n_inject]
@@ -353,13 +325,11 @@ class TMIOptimizer:
             self.optimizer.best_fitness = self.best_fitness
             self.optimizer.best_solution = self.best_solution.copy()
 
-    def run(self) -> tuple:
-        """
-        Run until budget exhausted.
+    # ------------------------------------------------------------------
+    # Run
+    # ------------------------------------------------------------------
 
-        Returns:
-            (best_solution, best_fitness) tuple.
-        """
+    def run(self) -> tuple:
         while self.fe_count < self.max_fe:
             self.step()
         return self.best_solution, self.best_fitness
@@ -369,9 +339,6 @@ class TMIOptimizer:
     # ------------------------------------------------------------------
 
     def get_run_stats(self) -> dict:
-        """
-        Return a dictionary of run statistics suitable for paper tables.
-        """
         orc_stats = self.oracle.get_orc_stats() if self._use_orc else {}
         return {
             'base': self.base_name,
