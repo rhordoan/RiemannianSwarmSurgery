@@ -1,7 +1,6 @@
-numpy
-networkx
-gudhi
-GraphRicciCurvature
-matplotlib
-scipy
-mealpy
+numpy>=1.26
+scipy>=1.13
+networkx>=3.4
+matplotlib>=3.8
+opfunu>=1.0.1
+cma>=3.3
