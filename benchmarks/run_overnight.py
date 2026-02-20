@@ -1,30 +1,33 @@
 #!/usr/bin/env python3
 """
-ORC-SHADE Overnight Benchmark
-CEC 2022 | D=10 and D=20 | 30 seeds | NL-SHADE vs ORC-SHADE (+ ablations)
+ORC-SHADE Overnight Benchmark  --  CEC 2022
+============================================
+Compares NL-SHADE vs ORC-SHADE (and optional ablations) on F1-F12.
+Results are written incrementally to CSV; interrupted runs resume cleanly.
 
-Designed for M2 Ultra / multi-core machines. Results are saved incrementally
-to CSV so a crashed run can be resumed without losing completed work.
+Standard FE budgets (CEC 2022 competition spec):
+  D=10 -> 200,000 FEs   |   D=20 -> 1,000,000 FEs
 
 Usage
 -----
-# Full overnight run (30 seeds, D=10+D=20, ablations included)
-python benchmarks/run_overnight.py
+  # Full overnight: D=10 + D=20, 30 seeds, ablations included
+  python benchmarks/run_overnight.py --ablation
 
-# Quick sanity check (3 seeds, D=10 only)
-python benchmarks/run_overnight.py --seeds 3 --dims 10 --budget 30000
+  # Quick test (3 seeds, D=10 only, 30k FE)
+  python benchmarks/run_overnight.py --seeds 3 --dims 10 --budget_d10 30000
 
-# Resume after interruption (skips already-saved rows)
-python benchmarks/run_overnight.py --resume
+  # Resume after interruption
+  python benchmarks/run_overnight.py --resume
 
-# Specify number of parallel workers (default: all cores - 2)
-python benchmarks/run_overnight.py --workers 20
+  # Specific worker count for M2 Ultra (default = cpu_count - 2)
+  python benchmarks/run_overnight.py --workers 20
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import io
 import os
 import sys
 import time
@@ -33,10 +36,13 @@ from multiprocessing import Pool, cpu_count, freeze_support
 from pathlib import Path
 
 import numpy as np
-from scipy.stats import wilcoxon
 
 warnings.filterwarnings("ignore")
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Make the project root importable in both main and worker processes
+_ROOT = str(Path(__file__).resolve().parent.parent)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 
 # ---------------------------------------------------------------------------
@@ -44,24 +50,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # ---------------------------------------------------------------------------
 
 def _make_problem(func_num: int, dim: int):
-    import opfunu
+    """Build a CEC 2022 problem object (error = f(x) - f*)."""
+    import opfunu, warnings
     warnings.filterwarnings("ignore")
     cls = getattr(opfunu.cec_based, f"F{func_num}2022")
-    prob = cls(ndim=dim)
+    inner = cls(ndim=dim)
+    f_bias = inner.f_bias
 
     class _Prob:
         bounds = [-100.0, 100.0]
-        f_bias = prob.f_bias
-        _inner = prob
 
-        def evaluate(self, x: np.ndarray) -> float:
-            return max(0.0, float(self._inner.evaluate(x)) - self.f_bias)
+        def evaluate(self, x):
+            return max(0.0, float(inner.evaluate(x)) - f_bias)
 
     return _Prob()
 
 
 # ---------------------------------------------------------------------------
-# Variant configurations
+# Variant registry
 # ---------------------------------------------------------------------------
 
 VARIANTS: dict = {
@@ -77,72 +83,112 @@ VARIANTS: dict = {
             "orc_lambda": 0.5,
         },
     },
-    # Ablation: more aggressive (tighter threshold = explores more often)
     "ORC-SHADE[tau=-0.10]": {
         "cls": "ORCSHADE",
-        "kwargs": {
-            "orc_threshold": -0.10,
-            "max_explore_frac": 0.25,
-            "orc_lambda": 0.5,
-        },
+        "kwargs": {"orc_threshold": -0.10, "max_explore_frac": 0.25},
     },
-    # Ablation: more conservative (threshold = -0.50)
     "ORC-SHADE[tau=-0.50]": {
         "cls": "ORCSHADE",
-        "kwargs": {
-            "orc_threshold": -0.50,
-            "max_explore_frac": 0.25,
-            "orc_lambda": 0.5,
-        },
+        "kwargs": {"orc_threshold": -0.50, "max_explore_frac": 0.25},
     },
-    # Ablation: no explore cap (frac=1.0, essentially explore all saddles)
     "ORC-SHADE[frac=0.40]": {
+        "cls": "ORCSHADE",
+        "kwargs": {"orc_threshold": -0.30, "max_explore_frac": 0.40},
+    },
+    "ORC-SHADE[no-orc]": {
+        "cls": "ORCSHADE",
+        # Force max_explore_frac=0 so ORC is never triggered -> pure NL-SHADE clone
+        "kwargs": {"orc_threshold": -0.30, "max_explore_frac": 0.0},
+    },
+    "ORC-SHADE[adaptive]": {
         "cls": "ORCSHADE",
         "kwargs": {
             "orc_threshold": -0.30,
-            "max_explore_frac": 0.40,
-            "orc_lambda": 0.5,
-        },
-    },
-    # Ablation: no ORC (pure NL-SHADE reimplemented via ORCSHADE with tau=0)
-    "ORC-SHADE[no-orc]": {
-        "cls": "ORCSHADE",
-        "kwargs": {
-            "orc_threshold": 0.0,         # Never triggers (all kappa <= 0)
-            "max_explore_frac": 0.0,      # Explore fraction = 0
-            "orc_lambda": 0.5,
+            "max_explore_frac": 0.25,
+            "adaptive_threshold": True,
         },
     },
 }
 
+MAIN_VARIANTS = ["NL-SHADE", "ORC-SHADE"]
 
-def _build_variant(name: str, problem, dim: int, max_fe: int):
+
+def _build_opt(name: str, problem, dim: int, max_fe: int):
     cfg = VARIANTS[name]
     if cfg["cls"] == "NLSHADE":
+        if _ROOT not in sys.path:
+            sys.path.insert(0, _ROOT)
         from benchmarks.nlshade import NLSHADE
         return NLSHADE(problem, dim, max_fe=max_fe)
     else:
+        if _ROOT not in sys.path:
+            sys.path.insert(0, _ROOT)
         from src.orc_shade import ORCSHADE
         return ORCSHADE(problem, dim, max_fe=max_fe, **cfg["kwargs"])
 
 
 # ---------------------------------------------------------------------------
-# Single-run worker (must be top-level for multiprocessing)
+# Convergence milestone helper
+# ---------------------------------------------------------------------------
+
+def _sample_convergence(opt, max_fe: int, milestones=(0.1, 0.25, 0.5, 0.75, 1.0)):
+    """
+    Sample best fitness at key FE checkpoints.
+    Works for both NLSHADE (no convergence_log) and ORCSHADE.
+    """
+    log = getattr(opt, "convergence_log", None)
+    if not log:
+        return {}
+    # log is [(fe_count, best_fit), ...]
+    results = {}
+    for m in milestones:
+        target_fe = int(m * max_fe)
+        # Find last entry with fe_count <= target_fe
+        best = None
+        for fe, bf in log:
+            if fe <= target_fe:
+                best = bf
+        if best is not None:
+            results[f"err_at_{int(m*100)}pct"] = best
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Single-run worker (top-level, safe for multiprocessing spawn on macOS)
 # ---------------------------------------------------------------------------
 
 def _run_one(args: tuple) -> dict:
     variant, func_num, dim, seed, max_fe = args
-    np.random.seed(seed)
+
+    # Ensure project root is importable inside spawned worker (macOS / spawn)
+    import sys, os
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
+
     import warnings
     warnings.filterwarnings("ignore")
+    import numpy as np
+    np.random.seed(seed)
 
-    t0 = time.perf_counter()
+    t0 = __import__("time").perf_counter()
     problem = _make_problem(func_num, dim)
-    opt = _build_variant(variant, problem, dim, max_fe)
-    opt.run()
-    elapsed = time.perf_counter() - t0
+    opt = _build_opt(variant, problem, dim, max_fe)
 
-    row = {
+    # Run with convergence logging for NLSHADE (wrap step to track)
+    if not hasattr(opt, "convergence_log"):
+        opt.convergence_log = [(opt.fe_count, opt.best_fitness)]
+        _orig_step = opt.step
+        def _logged_step():
+            ret = _orig_step()
+            opt.convergence_log.append((opt.fe_count, opt.best_fitness))
+            return ret
+        opt.step = _logged_step
+
+    opt.run()
+    elapsed = __import__("time").perf_counter() - t0
+
+    row: dict = {
         "variant": variant,
         "dim": dim,
         "func": func_num,
@@ -154,6 +200,8 @@ def _run_one(args: tuple) -> dict:
         "effective_threshold": "",
         "n_explore_agents": "",
     }
+    # Convergence milestones
+    row.update(_sample_convergence(opt, max_fe))
 
     if hasattr(opt, "get_run_stats"):
         st = opt.get_run_stats()
@@ -166,18 +214,18 @@ def _run_one(args: tuple) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# CSV helpers
+# CSV I/O
 # ---------------------------------------------------------------------------
 
-FIELDNAMES = [
+FIXED_FIELDS = [
     "variant", "dim", "func", "seed",
     "best_fit", "elapsed_s",
     "explore_pct", "mean_kappa", "effective_threshold", "n_explore_agents",
+    "err_at_10pct", "err_at_25pct", "err_at_50pct", "err_at_75pct", "err_at_100pct",
 ]
 
 
-def _load_existing(csv_path: Path) -> set:
-    """Return set of (variant, dim, func, seed) already completed."""
+def _load_done(csv_path: Path) -> set:
     done: set = set()
     if not csv_path.exists():
         return done
@@ -188,80 +236,70 @@ def _load_existing(csv_path: Path) -> set:
 
 
 def _append_row(csv_path: Path, row: dict):
-    exists = csv_path.exists()
+    new_file = not csv_path.exists()
+    # Ensure all fixed fields exist
+    for k in FIXED_FIELDS:
+        row.setdefault(k, "")
     with open(csv_path, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDNAMES)
-        if not exists:
+        w = csv.DictWriter(f, fieldnames=FIXED_FIELDS, extrasaction="ignore")
+        if new_file:
             w.writeheader()
         w.writerow(row)
 
 
 # ---------------------------------------------------------------------------
-# Summary / statistics
+# Live summary
 # ---------------------------------------------------------------------------
 
-def _print_summary(csv_path: Path, variant_a: str = "NL-SHADE", variant_b: str = "ORC-SHADE"):
-    """Print a Wilcoxon-tested summary table from the CSV."""
-    import csv as _csv
-    rows: list[dict] = []
+def _print_summary(csv_path: Path, dims: list, funcs: list,
+                   var_a: str = "NL-SHADE", var_b: str = "ORC-SHADE"):
+    from scipy.stats import wilcoxon, friedmanchisquare
+    from collections import defaultdict
+    data: dict = defaultdict(list)
     with open(csv_path, newline="") as f:
-        rows = list(_csv.DictReader(f))
-
-    if not rows:
-        print("No data yet.")
-        return
-
-    dims = sorted({int(r["dim"]) for r in rows})
-    funcs = sorted({int(r["func"]) for r in rows})
+        for row in csv.DictReader(f):
+            k = (row["variant"], int(row["dim"]), int(row["func"]))
+            data[k].append(float(row["best_fit"]))
 
     for dim in dims:
-        print()
-        print(f"=== D = {dim} ===")
-        header = (
-            f"{'F':<5} | {'NL-SHADE (mean)':>17} | {'ORC-SHADE (mean)':>17} "
-            f"| {'Win':>6} | {'p':>8}"
-        )
-        print(header)
-        print("-" * len(header))
-
+        has = any(k[1] == dim for k in data)
+        if not has:
+            continue
+        print(f"\n{'='*72}\nD = {dim}\n{'='*72}")
+        hdr = f"{'F':<5} | {'NL-SHADE':>19} | {'ORC-SHADE':>19} | {'Win':>5} | {'p':>8}"
+        print(hdr)
+        print("-" * len(hdr))
         orc_w = nl_w = ties = 0
         for f in funcs:
-            a_vals = [float(r["best_fit"]) for r in rows
-                      if r["variant"] == variant_a and int(r["dim"]) == dim and int(r["func"]) == f]
-            b_vals = [float(r["best_fit"]) for r in rows
-                      if r["variant"] == variant_b and int(r["dim"]) == dim and int(r["func"]) == f]
-
-            if not a_vals or not b_vals:
+            a = np.array(data.get((var_a, dim, f), []))
+            b = np.array(data.get((var_b, dim, f), []))
+            if not len(a) or not len(b):
                 continue
-
-            a, b = np.array(a_vals), np.array(b_vals)
             n = min(len(a), len(b))
             a, b = a[:n], b[:n]
-
             try:
-                if np.allclose(a, b):
-                    p = 1.0
-                else:
-                    _, p = wilcoxon(a, b, alternative="two-sided")
+                p = wilcoxon(a, b, alternative="two-sided").pvalue if not np.allclose(a, b) else 1.0
             except Exception:
                 p = float("nan")
-
-            sig = p < 0.05 and np.isfinite(p)
+            sig = np.isfinite(p) and p < 0.05
             if sig and b.mean() < a.mean():
                 win, orc_w = "ORC+", orc_w + 1
             elif sig and a.mean() < b.mean():
                 win, nl_w = "NL+ ", nl_w + 1
             else:
                 win, ties = "TIE ", ties + 1
-
-            print(
-                f"F{f:<4} | {a.mean():>8.2e}+/-{a.std():.1e} "
-                f"| {b.mean():>8.2e}+/-{b.std():.1e} "
-                f"| {win:>6} | {p:>8.4f}"
-            )
-
-        print("-" * len(header))
+            print(f"F{f:<4} | {a.mean():>9.2e} +/-{a.std():.1e} | {b.mean():>9.2e} +/-{b.std():.1e} | {win:>5} | {p:>8.4f}")
+        print("-" * len(hdr))
         print(f"ORC wins: {orc_w}  NL wins: {nl_w}  Ties: {ties}")
+
+        # Friedman test across all 12 functions
+        try:
+            groups = [data.get((v, dim, f), []) for v in [var_a, var_b] for f in funcs if data.get((v, dim, f))]
+            if len(groups) >= 3:
+                stat, pf = friedmanchisquare(*groups)
+                print(f"Friedman chi2={stat:.2f}  p={pf:.4f}")
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -269,108 +307,93 @@ def _print_summary(csv_path: Path, variant_a: str = "NL-SHADE", variant_b: str =
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="ORC-SHADE overnight benchmark")
-    parser.add_argument("--dims", type=int, nargs="+", default=[10, 20],
-                        help="Dimensions to benchmark (default: 10 20)")
-    parser.add_argument("--funcs", type=int, nargs="+", default=list(range(1, 13)),
-                        help="CEC 2022 function IDs (default: 1-12)")
-    parser.add_argument("--seeds", type=int, default=30,
-                        help="Number of independent seeds (default: 30)")
-    parser.add_argument("--budget", type=int, default=0,
-                        help="Override FE budget for all dims (0 = use CEC 2022 standard)")
-    parser.add_argument("--workers", type=int,
-                        default=max(1, cpu_count() - 2),
-                        help="Parallel workers (default: cpu_count - 2)")
-    parser.add_argument("--out", type=str, default="results/orc_shade_cec2022.csv",
-                        help="Output CSV path")
-    parser.add_argument("--resume", action="store_true",
-                        help="Skip already-completed (variant,dim,func,seed) combos")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dims", type=int, nargs="+", default=[10, 20])
+    parser.add_argument("--funcs", type=int, nargs="+", default=list(range(1, 13)))
+    parser.add_argument("--seeds", type=int, default=30)
+    parser.add_argument("--budget_d10", type=int, default=200_000,
+                        help="FE budget for D=10 (default: 200000)")
+    parser.add_argument("--budget_d20", type=int, default=1_000_000,
+                        help="FE budget for D=20 (default: 1000000)")
+    parser.add_argument("--workers", type=int, default=max(1, cpu_count() - 2))
+    parser.add_argument("--out", default="results/orc_shade_cec2022.csv")
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument("--ablation", action="store_true",
-                        help="Include ablation variants (slower ??? 6 variants total)")
-    parser.add_argument("--no_parallel", action="store_true",
-                        help="Disable multiprocessing (for debugging)")
+                        help="Include 5 ablation variants (adds ~4x runtime)")
+    parser.add_argument("--no_parallel", action="store_true")
     args = parser.parse_args()
 
-    # CEC 2022 standard FE budgets
-    std_budget = {10: 200_000, 20: 1_000_000}
-
+    budgets = {10: args.budget_d10, 20: args.budget_d20}
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Decide which variants to run
-    if args.ablation:
-        run_variants = list(VARIANTS.keys())
-    else:
-        run_variants = ["NL-SHADE", "ORC-SHADE"]
-
-    done = _load_existing(out_path) if args.resume else set()
-    if done:
-        print(f"Resuming: {len(done)} runs already completed, skipping them.")
+    run_variants = list(VARIANTS.keys()) if args.ablation else MAIN_VARIANTS
+    done = _load_done(out_path) if args.resume else set()
 
     tasks: list[tuple] = []
     for dim in args.dims:
-        max_fe = args.budget if args.budget > 0 else std_budget.get(dim, 200_000)
+        max_fe = budgets.get(dim, 200_000)
         for v in run_variants:
             for f in args.funcs:
                 for seed in range(args.seeds):
-                    key = (v, dim, f, seed)
-                    if key not in done:
+                    if (v, dim, f, seed) not in done:
                         tasks.append((v, f, dim, seed, max_fe))
 
     total = len(tasks)
-    if total == 0:
-        print("All runs already complete. Run with --resume to add more seeds/dims.")
-        _print_summary(out_path)
+    if not total:
+        print("All runs complete. Run --resume with additional seeds/dims to extend.")
+        _print_summary(out_path, args.dims, args.funcs)
         return
 
+    workers = 1 if args.no_parallel else args.workers
     print(
         f"\nORC-SHADE Overnight Benchmark\n"
         f"  Variants : {run_variants}\n"
-        f"  Dims     : {args.dims}\n"
-        f"  Funcs    : F1-F12\n"
-        f"  Seeds    : {args.seeds}\n"
-        f"  Workers  : {1 if args.no_parallel else args.workers}\n"
-        f"  Tasks    : {total}\n"
-        f"  Output   : {out_path}\n"
+        f"  Dims     : {args.dims}  (budgets: D10={args.budget_d10:,}  D20={args.budget_d20:,})\n"
+        f"  Seeds    : {args.seeds}  |  Funcs: F1-F12\n"
+        f"  Workers  : {workers}  |  Tasks: {total}\n"
+        f"  Output   : {out_path}\n",
+        flush=True,
     )
 
     completed = 0
     t_start = time.perf_counter()
 
-    def _on_result(row: dict):
+    def _handle(row: dict):
         nonlocal completed
         _append_row(out_path, row)
         completed += 1
         elapsed = time.perf_counter() - t_start
         eta = elapsed / completed * (total - completed) if completed else 0
         pct = 100.0 * completed / total
+        ep = row.get("explore_pct", "")
+        ep_str = f"  expl={ep:.0f}%" if ep != "" else ""
         print(
             f"  [{completed:>{len(str(total))}}/{total}] "
-            f"D={row['dim']} F{row['func']} {row['variant']:<24} "
-            f"err={row['best_fit']:.3e}  "
-            f"{pct:.1f}%  ETA {eta/3600:.1f}h",
+            f"D={row['dim']} F{row['func']} {row['variant']:<28} "
+            f"err={row['best_fit']:.3e}{ep_str}  "
+            f"{pct:.1f}%  ETA {eta/3600:.2f}h",
             flush=True,
         )
 
-    if args.no_parallel or args.workers == 1:
+    if workers == 1:
         for task in tasks:
-            _on_result(_run_one(task))
+            _handle(_run_one(task))
     else:
-        with Pool(args.workers) as pool:
+        with Pool(workers) as pool:
             for row in pool.imap_unordered(_run_one, tasks):
-                _on_result(row)
+                _handle(row)
 
-    print("\n\nAll runs complete. Summary:\n")
-    _print_summary(out_path)
+    print("\n\nAll runs complete.\n")
+    _print_summary(out_path, args.dims, args.funcs)
 
-    # Also save a plain-text summary next to the CSV
-    summary_path = out_path.with_suffix(".summary.txt")
-    import io, contextlib
     buf = io.StringIO()
+    import contextlib
     with contextlib.redirect_stdout(buf):
-        _print_summary(out_path)
+        _print_summary(out_path, args.dims, args.funcs)
+    summary_path = out_path.with_suffix(".summary.txt")
     summary_path.write_text(buf.getvalue())
-    print(f"\nSummary saved to {summary_path}")
+    print(f"Summary -> {summary_path}")
 
 
 if __name__ == "__main__":

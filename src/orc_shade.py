@@ -200,7 +200,7 @@ class _CurvatureField:
                         nbr_arr = np.array(other_nbrs, dtype=int)
                         nbr_fits = aug_fit[nbr_arr]
                         # Only cross the saddle if the other community is better
-                        if nbr_fits.mean() < aug_fit[agent_idx]:
+                        if nbr_fits.min() < aug_fit[agent_idx]:  # any better neighbour is enough
                             # Softmin-weighted centroid: weight by exp(-f/sigma)
                             # so the best agents in the other basin pull hardest
                             shifted = nbr_fits - nbr_fits.min()
@@ -277,7 +277,13 @@ class ORCSHADE:
         self.lb = lb
         self.ub = ub
 
-        self.pop = np.random.uniform(lb, ub, (self.pop_size_init, dim))
+        try:
+            from scipy.stats.qmc import LatinHypercube
+            sampler = LatinHypercube(d=dim, seed=None)
+            lhs = sampler.random(n=self.pop_size_init)
+            self.pop = lb + (ub - lb) * lhs
+        except Exception:
+            self.pop = np.random.uniform(lb, ub, (self.pop_size_init, dim))
         self.fitness = np.array([problem.evaluate(x) for x in self.pop])
         self.fe_count = self.pop_size_init
 
