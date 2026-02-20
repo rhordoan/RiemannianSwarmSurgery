@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # ==============================================================================
-# ORC-SHADE A* Paper: FULL Overnight Pipeline
+# ORC-SHADE A* Paper: FULL Overnight Pipeline (macOS Fix Edition)
 # ==============================================================================
 # 1. Creates/Updates Python Virtual Environment
-# 2. Installs SOTA Optimization Dependencies
+# 2. Forces installation of setuptools (pkg_resources fix)
 # 3. Runs 30-seed CEC 2022 Benchmark (D=10, D=20)
 # 4. Generates LaTeX Tables & Analysis
 # ==============================================================================
@@ -33,8 +33,6 @@ else
     exit 1
 fi
 
-echo "Using: $($PYTHON_BIN --version)"
-
 # Create VENV if missing
 if [ ! -d "$VENV_DIR" ]; then
     echo "Creating virtual environment in $VENV_DIR..."
@@ -45,22 +43,23 @@ fi
 echo "Activating virtual environment..."
 source "$VENV_DIR/bin/activate"
 
-# Update tools
-echo "Updating pip and installing dependencies..."
-pip install --upgrade pip setuptools wheel
+# CRITICAL FIX: Explicitly install setuptools which provides pkg_resources
+echo "Installing/Updating setuptools and core dependencies..."
+pip install --upgrade pip
+pip install setuptools wheel
 pip install numpy scipy opfunu matplotlib
+
+# Verify pkg_resources is available
+python -c "import pkg_resources; print('Dependency check: pkg_resources OK')"
 
 echo "=============================================================================="
 echo "2. EXECUTION: ORC-SHADE SOTA BENCHMARK"
 echo "=============================================================================="
-echo "Machine: M2 Ultra Detection"
-echo "Workers: 20 (Optimized for performance/thermal headroom)"
+echo "Machine: M2 Ultra / macOS detected"
 echo "Mode: Full Ablation (Sensitivity Analysis Enabled)"
-echo "Output: $CSV_OUT"
 echo "------------------------------------------------------------------------------"
 
-# Run the benchmark
-# --resume allows you to stop and restart without losing data
+# Run the benchmark using the venv python explicitly to ensure workers use it
 python benchmarks/run_overnight.py \
     --dims 10 20 \
     --seeds 30 \
@@ -76,9 +75,6 @@ echo "==========================================================================
 python benchmarks/analyze_overnight.py "$CSV_OUT" --latex --ablation > "$SUMMARY_OUT"
 
 echo "DONE."
-echo "------------------------------------------------------------------------------"
 echo "Results CSV     : $CSV_OUT"
 echo "LaTeX & Summary : $SUMMARY_OUT"
-echo "------------------------------------------------------------------------------"
-echo "To view summary now: cat $SUMMARY_OUT"
 echo "=============================================================================="
