@@ -164,8 +164,11 @@ class SaddleArchive:
         for i in range(n):
             saddle = ordered[i % len(ordered)]
 
-            # Adaptive step: at least half the edge distance, at most step_size
-            effective_step = max(step_size, 0.5 * saddle.get('edge_dist', step_size))
+            # Adaptive step: jump past the saddle into the next basin, proportional to the
+            # local geometry (edge_dist). Cap at step_size to prevent wild jumps.
+            effective_step = min(step_size, 1.5 * saddle.get('edge_dist', step_size))
+            # Ensure a minimum step so we don't get stuck exactly on the boundary
+            effective_step = max(effective_step, 1e-4)
 
             noise_std = max(effective_step * 0.15, 1e-6)
             noise = rng.normal(0.0, noise_std, dim)

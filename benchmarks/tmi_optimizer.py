@@ -155,10 +155,13 @@ class TMIOptimizer:
         self.optimizer.step()
         self.generation += 1
 
-        if self.optimizer.best_fitness < self.best_fitness - 1e-12:
+        if self.optimizer.best_fitness < self.best_fitness:
+            if self.optimizer.best_fitness < self.best_fitness - 1e-12:
+                self.gens_without_improvement = 0
+            else:
+                self.gens_without_improvement += 1
             self.best_fitness = self.optimizer.best_fitness
             self.best_solution = self.optimizer.best_solution.copy()
-            self.gens_without_improvement = 0
         else:
             self.gens_without_improvement += 1
 
