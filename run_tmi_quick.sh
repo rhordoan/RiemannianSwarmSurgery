@@ -32,8 +32,13 @@ python benchmarks/run_tmi_benchmark.py \
     --dim      10 \
     --max-fe   30000 \
     --funcs    4 8 12 \
-    --variants A B C D \
+    --variants A B C D E \
     --no-parallel \
     --out      "${OUT}"
 
+echo ""
+echo "=== Analysis ==="
+python benchmarks/analyze_results.py "${OUT}"
+
+echo ""
 echo "Quick test done. Results: ${OUT}"

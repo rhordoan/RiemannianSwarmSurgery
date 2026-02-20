@@ -27,7 +27,9 @@ SEEDS=30
 DIM=10
 MAX_FE=200000
 FUNCS="1 2 3 4 5 6 7 8 9 10 11 12"
-VARIANTS="A B C D"
+# E = NL-SHADE + random injection (same trigger/cap as D but no ORC).
+# This is the critical ablation: if D >> E, ORC geometry is proven useful.
+VARIANTS="A B C D E"
 WORKERS=$(python3 -c "import os; print(max(1, os.cpu_count() - 1))" 2>/dev/null || echo 4)
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 OUT="results/tmi_cec2022_${TIMESTAMP}.csv"
@@ -70,6 +72,8 @@ echo ""
 echo "[run] Starting benchmark at $(date)"
 echo ""
 
+# ---------- D=10 run (CEC 2022 primary) ----------
+echo "[run] D=10 benchmark starting..."
 python benchmarks/run_tmi_benchmark.py \
     --seeds    "${SEEDS}" \
     --dim      "${DIM}" \
@@ -80,7 +84,41 @@ python benchmarks/run_tmi_benchmark.py \
     --out      "${OUT}" \
     2>&1 | tee "${LOG}"
 
+# ---------- D=20 run (curse-of-dimensionality validation) ----------
+OUT20="results/tmi_cec2022_D20_${TIMESTAMP}.csv"
+LOG20="results/tmi_cec2022_D20_${TIMESTAMP}.log"
+echo ""
+echo "[run] D=20 benchmark starting (max_FE=1,000,000)..."
+python benchmarks/run_tmi_benchmark.py \
+    --seeds    "${SEEDS}" \
+    --dim      20 \
+    --max-fe   1000000 \
+    --funcs    ${FUNCS} \
+    --variants ${VARIANTS} \
+    --workers  "${WORKERS}" \
+    --out      "${OUT20}" \
+    2>&1 | tee "${LOG20}"
+
 echo ""
 echo "[done] Benchmark complete at $(date)"
 echo "Results : ${OUT}"
 echo "Log     : ${LOG}"
+
+# ---------- auto-analyze ----------
+echo ""
+echo "[analyze] Analyzing D=10 results..."
+python benchmarks/analyze_results.py "${OUT}" --latex \
+    2>&1 | tee -a "${LOG}"
+
+echo ""
+echo "[analyze] Analyzing D=20 results..."
+python benchmarks/analyze_results.py "${OUT20}" --latex \
+    2>&1 | tee -a "${LOG20}"
+
+echo ""
+echo "========================================"
+echo "All done."
+echo "D=10 CSV     : ${OUT}"
+echo "D=20 CSV     : ${OUT20}"
+echo "Figures      : results/figures/"
+echo "========================================"

@@ -60,10 +60,16 @@ class TMIOptimizer:
         k_orc:              k-NN degree for the Riemannian oracle.
         orc_threshold:      ORC value below which an edge is a saddle (-0.1).
         orc_update_period:  Oracle runs every this many generations (5).
-        stagnation_gens:    Gens without improvement to trigger injection (30).
+        stagnation_gens:    Gens without improvement to trigger injection.
+                            Auto-scaled to budget when None.
         injection_fraction: Fraction of population replaced per injection (0.30).
         inject_step_frac:   Injection displacement as fraction of domain (0.15).
         max_saddles:        Capacity of the Saddle Archive (30).
+        max_injections:     Hard cap on total injections per run (8).
+        use_orc:            If False, skip ORC oracle and saddle archive entirely.
+                            On stagnation, inject uniformly random LHS points
+                            instead of geometry-guided ones.  Used for Variant E
+                            (ablation: random injection, same trigger and budget).
     """
 
     # Defaults tuned on CEC 2022 D=10, max_FE=200_000
@@ -93,7 +99,8 @@ class TMIOptimizer:
                  injection_fraction: float = None,
                  inject_step_frac: float = None,
                  max_saddles: int = None,
-                 max_injections: int = None):
+                 max_injections: int = None,
+                 use_orc: bool = True):
 
         self.problem = problem
         self.dim = dim
@@ -118,6 +125,7 @@ class TMIOptimizer:
         self._k_orc = k_orc if k_orc is not None else self.K_ORC
         self._max_saddles = max_saddles if max_saddles is not None else self.MAX_SADDLES
         self._max_injections = max_injections if max_injections is not None else self.MAX_INJECTIONS
+        self._use_orc = use_orc
 
         # Domain geometry
         lb, ub = float(problem.bounds[0]), float(problem.bounds[1])
@@ -133,20 +141,20 @@ class TMIOptimizer:
         else:
             raise ValueError(f"Unknown base optimizer '{base}'. Use 'lshade' or 'nlshade'.")
 
-        # --- Layer 2: Riemannian Oracle ---
+        # --- Layer 2: Riemannian Oracle (skipped when use_orc=False) ---
         self.oracle = RiemannianOracle(
             dim=dim,
             k=self._k_orc,
             orc_threshold=self._orc_threshold,
             update_period=self._orc_update_period,
             domain_width=self.domain_width,
-        )
+        ) if self._use_orc else None
 
-        # --- Layer 3: Saddle Archive ---
+        # --- Layer 3: Saddle Archive (skipped when use_orc=False) ---
         self.saddle_archive = SaddleArchive(
             domain_width=self.domain_width,
             max_saddles=self._max_saddles,
-        )
+        ) if self._use_orc else None
 
         # --- Internal state ---
         self.generation: int = 0
@@ -204,33 +212,42 @@ class TMIOptimizer:
 
         self._convergence.append((self.fe_count, self.best_fitness))
 
-        # 3. Oracle step (zero FEs)
-        saddles = self.oracle.step(
-            self.optimizer.pop,
-            self.optimizer.fitness,
-            self.generation,
-        )
+        if self._use_orc:
+            # 3. Oracle step (zero FEs)
+            saddles = self.oracle.step(
+                self.optimizer.pop,
+                self.optimizer.fitness,
+                self.generation,
+            )
 
-        # 4. Archive saddles
-        for u, v in saddles:
-            N = len(self.optimizer.pop)
-            if u < N and v < N:
-                stored = self.saddle_archive.store_saddle(
-                    self.optimizer.pop[u],
-                    self.optimizer.pop[v],
-                    float(self.optimizer.fitness[u]),
-                    float(self.optimizer.fitness[v]),
-                    self.generation,
-                )
-                if stored:
-                    self.saddles_archived += 1
+            # 4. Archive detected saddles
+            for u, v in saddles:
+                N = len(self.optimizer.pop)
+                if u < N and v < N:
+                    stored = self.saddle_archive.store_saddle(
+                        self.optimizer.pop[u],
+                        self.optimizer.pop[v],
+                        float(self.optimizer.fitness[u]),
+                        float(self.optimizer.fitness[v]),
+                        self.generation,
+                    )
+                    if stored:
+                        self.saddles_archived += 1
 
-        # 5. Topological injection on stagnation (respecting the per-run cap)
-        if (self.gens_without_improvement >= self._stagnation_gens
-                and self.saddle_archive.num_saddles > 0
-                and self.fe_count < self.max_fe
-                and self.injection_count < self._max_injections):
-            self._topological_injection()
+            # 5a. ORC-guided injection on stagnation
+            if (self.gens_without_improvement >= self._stagnation_gens
+                    and self.saddle_archive.num_saddles > 0
+                    and self.fe_count < self.max_fe
+                    and self.injection_count < self._max_injections):
+                self._topological_injection()
+        else:
+            # 5b. Random (LHS) injection on stagnation — Variant E ablation.
+            # Identical trigger and cap as the ORC path; only the injection
+            # *source* differs (uniform random vs geometry-guided).
+            if (self.gens_without_improvement >= self._stagnation_gens
+                    and self.fe_count < self.max_fe
+                    and self.injection_count < self._max_injections):
+                self._random_injection()
 
         return self.best_fitness
 
@@ -285,6 +302,57 @@ class TMIOptimizer:
             self.optimizer.best_fitness = self.best_fitness
             self.optimizer.best_solution = self.best_solution.copy()
 
+    def _random_injection(self):
+        """
+        Variant E ablation: replace the bottom INJECTION_FRACTION of the
+        population with agents drawn uniformly at random from [lb, ub]^dim
+        (Latin Hypercube Sampling within the domain).
+
+        Identical trigger conditions and FE accounting as _topological_injection.
+        The *only* difference is that injection positions come from LHS rather
+        than from the ORC-guided Saddle Archive.  This isolates the contribution
+        of ORC geometry: if TMI (D) significantly outperforms random injection
+        (E), the ORC oracle is genuinely earning its place.
+        """
+        N = len(self.optimizer.pop)
+        n_inject = max(1, int(round(self._injection_fraction * N)))
+
+        # Latin Hypercube Sampling: stratified random in [lb, ub]^dim
+        rng = np.random.default_rng()
+        points = np.empty((n_inject, self.dim))
+        for d in range(self.dim):
+            cuts = np.linspace(self.lb, self.ub, n_inject + 1)
+            points[:, d] = rng.uniform(cuts[:-1], cuts[1:])
+        rng.shuffle(points)  # shuffle rows so columns are independent
+
+        sorted_idx = np.argsort(self.optimizer.fitness)[::-1]
+        inject_idx = sorted_idx[:n_inject]
+
+        for local_i, pop_idx in enumerate(inject_idx):
+            if local_i >= len(points):
+                break
+            if self.fe_count >= self.max_fe:
+                break
+
+            x_new = points[local_i]
+            f_new = self.problem.evaluate(x_new)
+            self.optimizer.fe_count += 1
+            self.total_injection_fes += 1
+
+            self.optimizer.pop[pop_idx] = x_new
+            self.optimizer.fitness[pop_idx] = f_new
+
+            if f_new < self.best_fitness:
+                self.best_fitness = f_new
+                self.best_solution = x_new.copy()
+
+        self.injection_count += 1
+        self.gens_without_improvement = 0
+
+        if self.best_fitness < self.optimizer.best_fitness:
+            self.optimizer.best_fitness = self.best_fitness
+            self.optimizer.best_solution = self.best_solution.copy()
+
     def run(self) -> tuple:
         """
         Run until budget exhausted.
@@ -304,8 +372,10 @@ class TMIOptimizer:
         """
         Return a dictionary of run statistics suitable for paper tables.
         """
+        orc_stats = self.oracle.get_orc_stats() if self._use_orc else {}
         return {
             'base': self.base_name,
+            'use_orc': self._use_orc,
             'best_fitness': self.best_fitness,
             'fe_count': self.fe_count,
             'generations': self.generation,
@@ -314,7 +384,7 @@ class TMIOptimizer:
             'injection_count': self.injection_count,
             'total_injection_fes': self.total_injection_fes,
             'saddles_archived': self.saddles_archived,
-            'orc_min': self.oracle.min_orc,
-            'orc_mean': self.oracle.mean_orc,
-            'n_saddle_edges': self.oracle.n_saddle_edges,
+            'orc_min': orc_stats.get('min'),
+            'orc_mean': orc_stats.get('mean'),
+            'n_saddle_edges': orc_stats.get('n_saddles', 0),
         }

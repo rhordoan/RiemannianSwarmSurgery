@@ -110,13 +110,26 @@ def _run_one(args):
 
     elif variant == 'D':
         opt = TMIOptimizer(problem, base='nlshade', dim=dim,
-                           pop_size=pop_size, max_fe=max_fe)
+                           pop_size=pop_size, max_fe=max_fe, use_orc=True)
         opt.run()
         final_error = opt.best_fitness
         stats = opt.get_run_stats()
         inj_count = stats['injection_count']
         inj_fes = stats['total_injection_fes']
         saddles = stats['saddles_archived']
+
+    elif variant == 'E':
+        # Ablation: NL-SHADE + random (LHS) injection, no ORC.
+        # Identical trigger and injection budget to D.  If D >> E, the ORC
+        # geometry is the source of improvement (not just the restart mechanism).
+        opt = TMIOptimizer(problem, base='nlshade', dim=dim,
+                           pop_size=pop_size, max_fe=max_fe, use_orc=False)
+        opt.run()
+        final_error = opt.best_fitness
+        stats = opt.get_run_stats()
+        inj_count = stats['injection_count']
+        inj_fes = stats['total_injection_fes']
+        saddles = 0
 
     else:
         raise ValueError(f'Unknown variant: {variant}')
@@ -191,64 +204,70 @@ FUNC_LABELS = {
 }
 
 
-def _print_summary_table(results_by_func: dict, func_nums: list, n_seeds: int):
+def _print_summary_table(results_by_func: dict, func_nums: list, n_seeds: int,
+                         dim: int = 10, max_fe: int = 200_000):
     """Print a formatted table matching CEC paper conventions."""
 
-    header_fmt = '{:>4}  {:>10}  {:>10}  {:>10}  {:>10}  {:>6}  {:>6}  {:>4}  {:>4}'
-    row_fmt    = '{:>4}  {:>10.3e}  {:>10.3e}  {:>10.3e}  {:>10.3e}  {:>6.3f}  {:>6.3f}  {:>4}  {:>4}'
-
+    W = 105
     print()
-    print('=' * 85)
-    print(f'TMI CEC 2022 Benchmark  |  D=10  |  {n_seeds} seeds  |  max_FE=200,000')
-    print('=' * 85)
-    print('Variants: A=L-SHADE  B=L-SHADE+TMI  C=NL-SHADE  D=NL-SHADE+TMI')
-    print('Wilcoxon: * p<0.05  ** p<0.01  ns not significant')
-    print('TMI effect: + better  - worse  ~ no sig. difference')
-    print('-' * 85)
-    print(header_fmt.format('F#', 'A(mean)', 'B(mean)', 'C(mean)', 'D(mean)',
-                             'p(B/A)', 'p(D/C)', 'B/A', 'D/C'))
-    print('-' * 85)
+    print('=' * W)
+    print(f'TMI CEC 2022 Benchmark  |  D={dim}  |  {n_seeds} seeds  |  max_FE={max_fe:,}')
+    print('=' * W)
+    print('A=L-SHADE  B=L-SHADE+TMI  C=NL-SHADE  D=NL-SHADE+TMI  E=NL-SHADE+RandInj(ablation)')
+    print('Wilcoxon: ** p<0.01  * p<0.05  ns = not significant')
+    print('Effect:   + TMI better  - TMI worse  ~ no sig. difference')
+    print('-' * W)
 
-    total_wins_B = 0
-    total_wins_D = 0
+    hdr = ('{:>4}  {:>10}  {:>10}  {:>10}  {:>10}  {:>10}'
+           '  {:>7}  {:>7}  {:>7}  {:>5}  {:>5}  {:>5}')
+    row = ('{:>4}  {:>10.3e}  {:>10.3e}  {:>10.3e}  {:>10.3e}  {:>10.3e}'
+           '  {:>7.3f}  {:>7.3f}  {:>7.3f}  {:>5}  {:>5}  {:>5}')
+    print(hdr.format('F#', 'A', 'B', 'C', 'D', 'E',
+                     'p(B/A)', 'p(D/C)', 'p(D/E)', 'B/A', 'D/C', 'D/E'))
+    print('-' * W)
+
+    wins_B, wins_D_vs_C, wins_D_vs_E = 0, 0, 0
+    nan = float('nan')
 
     for fn in func_nums:
         if fn not in results_by_func:
             continue
         data = results_by_func[fn]
 
-        err_A = np.array([r['final_error'] for r in data if r['variant'] == 'A'])
-        err_B = np.array([r['final_error'] for r in data if r['variant'] == 'B'])
-        err_C = np.array([r['final_error'] for r in data if r['variant'] == 'C'])
-        err_D = np.array([r['final_error'] for r in data if r['variant'] == 'D'])
+        def _errs(v):
+            return np.array([r['final_error'] for r in data if r['variant'] == v])
 
-        mean_A = err_A.mean() if len(err_A) else float('nan')
-        mean_B = err_B.mean() if len(err_B) else float('nan')
-        mean_C = err_C.mean() if len(err_C) else float('nan')
-        mean_D = err_D.mean() if len(err_D) else float('nan')
+        err_A, err_B, err_C = _errs('A'), _errs('B'), _errs('C')
+        err_D, err_E = _errs('D'), _errs('E')
 
-        _, p_BA = _wilcoxon_p(err_B, err_A) if (len(err_A) and len(err_B)) else (0, 1.0)
-        _, p_DC = _wilcoxon_p(err_D, err_C) if (len(err_C) and len(err_D)) else (0, 1.0)
+        def _mean(a): return float(a.mean()) if len(a) else nan
+        mA, mB, mC, mD, mE = _mean(err_A), _mean(err_B), _mean(err_C), _mean(err_D), _mean(err_E)
 
-        sig_BA = _significance_marker(p_BA)
-        sig_DC = _significance_marker(p_DC)
-        eff_BA = _improvement_marker(mean_B, mean_A, p_BA)
-        eff_DC = _improvement_marker(mean_D, mean_C, p_DC)
+        def _wp(a, b): return _wilcoxon_p(a, b) if (len(a) and len(b)) else (0, 1.0)
+        _, p_BA   = _wp(err_B, err_A)
+        _, p_DC   = _wp(err_D, err_C)
+        _, p_DE   = _wp(err_D, err_E)   # KEY: ORC-guided vs random injection
 
-        if eff_BA == '+':
-            total_wins_B += 1
-        if eff_DC == '+':
-            total_wins_D += 1
+        def _tag(mean_new, mean_base, p):
+            return _significance_marker(p) + _improvement_marker(mean_new, mean_base, p)
 
-        tag = f'{sig_BA}{eff_BA}'
-        tag2 = f'{sig_DC}{eff_DC}'
-        print(row_fmt.format(fn, mean_A, mean_B, mean_C, mean_D,
-                             p_BA, p_DC, tag, tag2))
+        t_BA = _tag(mB, mA, p_BA)
+        t_DC = _tag(mD, mC, p_DC)
+        t_DE = _tag(mD, mE, p_DE)
 
-    print('-' * 85)
-    print(f'TMI wins (B>A): {total_wins_B}/{len(func_nums)}    '
-          f'TMI wins (D>C): {total_wins_D}/{len(func_nums)}')
-    print('=' * 85)
+        if _improvement_marker(mB, mA, p_BA) == '+':   wins_B      += 1
+        if _improvement_marker(mD, mC, p_DC) == '+':   wins_D_vs_C += 1
+        if _improvement_marker(mD, mE, p_DE) == '+':   wins_D_vs_E += 1
+
+        print(row.format(fn, mA, mB, mC, mD, mE,
+                         p_BA, p_DC, p_DE, t_BA, t_DC, t_DE))
+
+    print('-' * W)
+    n = len(func_nums)
+    print(f'Wins: B>A={wins_B}/{n}  D>C={wins_D_vs_C}/{n}  '
+          f'D>E(ORC vs random)={wins_D_vs_E}/{n}  '
+          f'[D>E is the key ablation]')
+    print('=' * W)
 
 
 def _print_injection_stats(results_all: list, func_nums: list):
@@ -377,7 +396,7 @@ def main():
         results_by_func.setdefault(r['func_num'], []).append(r)
 
     # Print summary table
-    _print_summary_table(results_by_func, func_nums, n_seeds)
+    _print_summary_table(results_by_func, func_nums, n_seeds, dim=dim, max_fe=max_fe)
 
     # Print injection statistics
     if any(v in variants for v in ['B', 'D']):
