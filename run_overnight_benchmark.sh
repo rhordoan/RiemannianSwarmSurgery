@@ -4,7 +4,7 @@
 # ORC-SHADE A* Paper: FULL Overnight Pipeline (macOS Fix Edition)
 # ==============================================================================
 # 1. Creates/Updates Python Virtual Environment
-# 2. Forces installation of setuptools (pkg_resources fix)
+# 2. Forces installation of setuptools<70.0 (pkg_resources fix)
 # 3. Runs 30-seed CEC 2022 Benchmark (D=10, D=20)
 # 4. Generates LaTeX Tables & Analysis
 # ==============================================================================
@@ -43,10 +43,11 @@ fi
 echo "Activating virtual environment..."
 source "$VENV_DIR/bin/activate"
 
-# CRITICAL FIX: Explicitly install setuptools which provides pkg_resources
+# CRITICAL FIX: Explicitly pin setuptools to <70.0.0 because opfunu relies on pkg_resources
+# which was entirely removed in setuptools 70+
 echo "Installing/Updating setuptools and core dependencies..."
 pip install --upgrade pip
-pip install setuptools wheel
+pip install "setuptools<70.0.0" wheel
 pip install numpy scipy opfunu matplotlib
 
 # Verify pkg_resources is available
