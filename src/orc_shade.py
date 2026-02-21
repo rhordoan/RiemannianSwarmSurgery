@@ -64,7 +64,7 @@ class _CurvatureField:
     fitness-gated softmin-centroid explore target for agents on saddles.
     """
 
-    def __init__(self, dim, update_period=3, ghost_size=None):
+    def __init__(self, dim, update_period=5, ghost_size=None):
         self.dim = dim
         self.update_period = update_period
         self.ghost_size = ghost_size if ghost_size is not None else 18 * dim
@@ -111,8 +111,19 @@ class _CurvatureField:
         n_active = len(pop)
         if not self._ghost_pos:
             return pop, fitness, n_active
-        aug_pop = np.vstack([pop, np.array(self._ghost_pos)])
-        aug_fit = np.concatenate([fitness, np.array(self._ghost_fit)])
+        ghost_arr = np.array(self._ghost_pos)
+        ghost_fit = np.array(self._ghost_fit)
+        # Use only the best orc_aug_size ghosts for ORC augmentation.
+        # Full ghost buffer includes early-run random scatter which creates
+        # artificial bimodal structure in the augmented population, causing
+        # spurious strongly-negative ORC on nearly every agent.
+        orc_aug_size = min(len(ghost_arr), 4 * self.dim)
+        if len(ghost_arr) > orc_aug_size:
+            top_idx = np.argpartition(ghost_fit, orc_aug_size)[:orc_aug_size]
+            ghost_arr = ghost_arr[top_idx]
+            ghost_fit = ghost_fit[top_idx]
+        aug_pop = np.vstack([pop, ghost_arr])
+        aug_fit = np.concatenate([fitness, ghost_fit])
         return aug_pop, aug_fit, n_active
 
     # ------------------------------------------------------------------
@@ -159,7 +170,7 @@ class _CurvatureField:
             proj_pop = aug_centered[:, :min(d_eff, aug_centered.shape[1])]
 
         # --- Adaptive k: scale with intrinsic dimensionality ---
-        k_target = min(2 * d_eff + 1, N_aug // 4, 10)
+        k_target = min(2 * d_eff + 1, N_aug // 4, 7)
         k_actual = min(k_target, N_aug - 1)
 
         if k_actual < 2:
@@ -187,10 +198,16 @@ class _CurvatureField:
         edges = list(edge_set)
 
         # --- ORC on projected positions ---
+        # Truncate nu/nv to k_actual-1 to guarantee equal support-set sizes.
+        # Every node has >=k_actual undirected neighbors; after excluding one
+        # endpoint, >=k_actual-1 remain. Fixed-size sets make cost matrices
+        # square, eliminating _pad_to_equal_size calls (was 86% of edge calls
+        # and the dominant runtime bottleneck at 0.12s / 0.22s total).
+        nbrs_limit = max(1, k_actual - 1)
         orc_edge = np.zeros(len(edges))
         for ei, (u, v) in enumerate(edges):
-            nu = [w for w in nbrs_list[u] if w != v]
-            nv = [w for w in nbrs_list[v] if w != u]
+            nu = [w for w in nbrs_list[u] if w != v][:nbrs_limit]
+            nv = [w for w in nbrs_list[v] if w != u][:nbrs_limit]
             if not nu or not nv:
                 continue
             orc_edge[ei] = compute_orc_edge(
@@ -262,7 +279,7 @@ class ORCSHADE:
     max_fe           : function evaluation budget
     pop_size_min     : minimum population after LPSR (default 4)
     H                : success-history length (default 6)
-    orc_update_period: recompute curvature every N generations (default 3)
+    orc_update_period: recompute curvature every N generations (default 5)
     ghost_size       : historical reservoir capacity (default 18*dim)
     pop_schedule     : "nonlinear" (NL-SHADE, default) or "linear"
     kappa_scale      : curvature normalization. alpha = clip(|kappa|/kappa_scale, 0, 1).
