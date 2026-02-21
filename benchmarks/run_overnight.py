@@ -75,38 +75,25 @@ VARIANTS: dict = {
         "cls": "NLSHADE",
         "kwargs": {},
     },
+    # ORC-SHADE v2: default (kappa_scale=1.0)
     "ORC-SHADE": {
         "cls": "ORCSHADE",
-        "kwargs": {
-            "orc_threshold": -0.30,
-            "max_explore_frac": 0.25,
-            "orc_lambda": 0.5,
-        },
+        "kwargs": {"kappa_scale": 1.0},
     },
-    "ORC-SHADE[tau=-0.10]": {
+    # Ablation: more aggressive blending (alpha grows faster)
+    "ORC-SHADE[ks=0.5]": {
         "cls": "ORCSHADE",
-        "kwargs": {"orc_threshold": -0.10, "max_explore_frac": 0.25},
+        "kwargs": {"kappa_scale": 0.5},
     },
-    "ORC-SHADE[tau=-0.50]": {
+    # Ablation: more conservative blending (alpha grows slower)
+    "ORC-SHADE[ks=2.0]": {
         "cls": "ORCSHADE",
-        "kwargs": {"orc_threshold": -0.50, "max_explore_frac": 0.25},
+        "kwargs": {"kappa_scale": 2.0},
     },
-    "ORC-SHADE[frac=0.40]": {
-        "cls": "ORCSHADE",
-        "kwargs": {"orc_threshold": -0.30, "max_explore_frac": 0.40},
-    },
+    # Ablation: ORC disabled (kappa_scale huge => alpha ~0 => pure NL-SHADE clone)
     "ORC-SHADE[no-orc]": {
         "cls": "ORCSHADE",
-        # Force max_explore_frac=0 so ORC is never triggered -> pure NL-SHADE clone
-        "kwargs": {"orc_threshold": -0.30, "max_explore_frac": 0.0},
-    },
-    "ORC-SHADE[adaptive]": {
-        "cls": "ORCSHADE",
-        "kwargs": {
-            "orc_threshold": -0.30,
-            "max_explore_frac": 0.25,
-            "adaptive_threshold": True,
-        },
+        "kwargs": {"kappa_scale": 999.0},
     },
 }
 
@@ -198,8 +185,7 @@ def _run_one(args: tuple) -> dict:
         "explore_pct": "",
         "mean_kappa": "",
         "effective_threshold": "",
-        "n_explore_agents": "",
-    }
+        "n_explore_agents": ""}
     # Convergence milestones
     row.update(_sample_convergence(opt, max_fe))
 
@@ -349,7 +335,7 @@ def main():
     print(
         f"\nORC-SHADE Overnight Benchmark\n"
         f"  Variants : {run_variants}\n"
-        f"  Dims     : {args.dims}  (budgets: D10={args.budget_d10:,}  D20={args.budget_d20:,})\n"
+        f"  Dims     : {args.dims}  (budgets: D10={args.budget_d10:}  D20={args.budget_d20:})\n"
         f"  Seeds    : {args.seeds}  |  Funcs: F1-F12\n"
         f"  Workers  : {workers}  |  Tasks: {total}\n"
         f"  Output   : {out_path}\n",

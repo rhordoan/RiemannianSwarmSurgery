@@ -1,39 +1,41 @@
 """
-ORC-SHADE: Curvature-Modulated Differential Evolution.
+ORC-SHADE v2: Curvature-Modulated Differential Evolution.
 
 A native algorithm (not a wrapper). Ollivier-Ricci Curvature (ORC) is
 embedded directly into the Differential Evolution mutation operator,
 continuously steering each agent based on its local topological position
 on the fitness landscape manifold.
 
-Core Mechanism
---------------
-At each generation, ORC is computed on a k-NN graph built over the active
-population PLUS a ghost reservoir of the best historically visited solutions
-(keeping the graph dense despite LPSR).
-
-For every agent i, the algorithm finds its most negatively curved incident
-edge and uses the curvature kappa_i to gate the mutation strategy:
-
-  kappa_i >= tau  (positive/neutral -- agent inside a basin)
-      EXPLOIT: current-to-pbest/1
-      v_i = x_i + F_i*(x_pbest - x_i) + F_i*(x_r1 - x_r2)
-
-  kappa_i < tau   (negative -- agent on a topological saddle boundary)
-      EXPLORE: current-to-explore/1 with boosted step
-      v_i = x_i + F_exp*(x_explore - x_i) + F_i*(x_r1 - x_r2)
-      F_exp = min(1, F_i * (1 + lambda * |kappa_i|))
-
-  x_explore = centroid of the unexplored neighboring community across saddle.
-
-Self-Regulation
+Architecture v2
 ---------------
-  Unimodal landscapes: all agents quickly enter positive curvature ->
-  ORC-SHADE degrades gracefully to pure NL-SHADE. No gate needed.
+Improvements over v1:
 
-  Multimodal landscapes: boundary agents get a continuous deterministic
-  nudge toward unexplored basins every update_period generations.
-  No stagnation counter, no population replacement, no heuristic trigger.
+1. PCA-Projected Curvature:
+   The k-NN graph and ORC values are computed in the top d_eff = min(D, 10)
+   principal components of the swarm+ghost ensemble, eliminating distance
+   concentration that makes curvature meaningless in high D. Explore targets
+   x_explore remain in the original D-dimensional space.
+
+2. Adaptive k-NN:
+   k = min(2*d_eff + 1, N_aug // 4, 10), bounded for computational cost.
+
+3. Continuous Alpha Blending:
+   Replaces v1 binary explore/exploit switch.
+   alpha_i = clip(|kappa_i| / kappa_scale, 0, 1) if kappa_i < 0 else 0
+   target_i = alpha_i * x_explore[i] + (1 - alpha_i) * x_pbest
+   v_i = x_i + F_i*(target_i - x_i) + F_i*(x_r1 - x_r2)
+
+4. Fitness-Gated Softmin-Centroid Explore Target:
+   For each agent on a saddle (kappa < 0), the explore target is the
+   softmin-weighted centroid of the community on the other side of the
+   most-negative-curvature edge. Fitness gate: only set explore target
+   when the other community contains at least one agent with better
+   fitness. This prevents off-ridge exploration on ridge functions and
+   spurious exploration on unimodal functions.
+
+Parameters removed vs v1: orc_threshold, max_explore_frac, orc_lambda,
+  adaptive_threshold, orc_k (derived from d_eff).
+Parameter added vs v1: kappa_scale (default 1.0, ORC is in [-1,1]).
 
 References
 ----------
@@ -55,31 +57,25 @@ from src.ollivier_ricci import compute_orc_edge
 
 class _CurvatureField:
     """
-    Lightweight continuous curvature monitor used natively inside ORC-SHADE.
+    Curvature oracle for ORC-SHADE v2.
 
-    Maintains a ghost reservoir of the best historically seen solutions and
-    computes per-agent ORC at configurable intervals. The reservoir keeps the
-    k-NN graph dense even after LPSR shrinks the active population to 4 agents.
+    Computes per-agent Ollivier-Ricci curvature on the PCA-projected
+    intrinsic manifold of the swarm+ghost ensemble, then sets a
+    fitness-gated softmin-centroid explore target for agents on saddles.
     """
 
-    def __init__(self, dim, k=5, orc_threshold=-0.30,
-                 update_period=3, ghost_size=None,
-                 adaptive_threshold=False, max_fe=1):
+    def __init__(self, dim, update_period=3, ghost_size=None):
         self.dim = dim
-        self.k = k
-        self.orc_threshold = orc_threshold
         self.update_period = update_period
         self.ghost_size = ghost_size if ghost_size is not None else 18 * dim
-        self.adaptive_threshold = adaptive_threshold
-        self.max_fe = max_fe
-        self._fe_count_ref = None
         self._ghost_pos = []
         self._ghost_fit = []
         self._kappa = np.array([])
         self._x_explore = np.zeros((0, dim))
+        self._explore_valid = np.zeros(0, dtype=bool)
         self._last_update = -999
-        self.n_explore_agents = 0
         self.mean_kappa = 0.0
+        self.n_clusters = 1
 
     # ------------------------------------------------------------------
     # Ghost reservoir management
@@ -125,12 +121,13 @@ class _CurvatureField:
 
     def compute(self, pop, fitness, generation):
         """
-        Compute per-agent curvature and explore targets.
+        Compute per-agent curvature and fitness-gated explore targets.
 
         Returns
         -------
         kappa     : ndarray (N,)   minimum incident ORC per active agent
-        x_explore : ndarray (N, d) explore target per active agent
+        x_explore : ndarray (N, d) softmin-centroid explore target
+                                   (only set where fitness gate passes)
         """
         N_active = len(pop)
         self.update_ghosts(pop, fitness)
@@ -141,21 +138,40 @@ class _CurvatureField:
             if len(k) != N_active:
                 k = np.zeros(N_active)
                 xe = np.tile(pop.mean(axis=0), (N_active, 1))
+                self._explore_valid = np.zeros(N_active, dtype=bool)
             return k, xe
 
         self._last_update = generation
         aug_pop, aug_fit, n_active = self._augmented(pop, fitness)
         N_aug = len(aug_pop)
-        k_actual = min(self.k, N_aug - 1)
+
+        # --- PCA projection to intrinsic manifold ---
+        # Graph topology and ORC computed in d_eff-dimensional space to
+        # eliminate distance concentration at high D. Explore targets stay
+        # in original space for full-dimensional mutation vectors.
+        d_eff = min(self.dim, 10)
+        aug_mean = aug_pop.mean(axis=0)
+        aug_centered = aug_pop - aug_mean
+        try:
+            _, _, Vt = np.linalg.svd(aug_centered, full_matrices=False)
+            proj_pop = aug_centered @ Vt[:d_eff].T
+        except np.linalg.LinAlgError:
+            proj_pop = aug_centered[:, :min(d_eff, aug_centered.shape[1])]
+
+        # --- Adaptive k: scale with intrinsic dimensionality ---
+        k_target = min(2 * d_eff + 1, N_aug // 4, 10)
+        k_actual = min(k_target, N_aug - 1)
 
         if k_actual < 2:
             zk = np.zeros(N_active)
             zx = np.tile(pop.mean(axis=0), (N_active, 1))
             self._kappa, self._x_explore = zk, zx
+            self._explore_valid = np.zeros(N_active, dtype=bool)
             return zk, zx
 
-        tree = KDTree(aug_pop)
-        _, indices = tree.query(aug_pop, k=k_actual + 1)
+        # --- k-NN graph on projected positions ---
+        tree = KDTree(proj_pop)
+        _, indices = tree.query(proj_pop, k=k_actual + 1)
 
         nbrs_list = [set() for _ in range(N_aug)]
         edge_set = set()
@@ -170,6 +186,7 @@ class _CurvatureField:
         nbrs_list = [list(s) for s in nbrs_list]
         edges = list(edge_set)
 
+        # --- ORC on projected positions ---
         orc_edge = np.zeros(len(edges))
         for ei, (u, v) in enumerate(edges):
             nu = [w for w in nbrs_list[u] if w != v]
@@ -177,13 +194,15 @@ class _CurvatureField:
             if not nu or not nv:
                 continue
             orc_edge[ei] = compute_orc_edge(
-                aug_pop[u], aug_pop[v],
-                aug_pop[np.array(nu, dtype=int)],
-                aug_pop[np.array(nv, dtype=int)],
+                proj_pop[u], proj_pop[v],
+                proj_pop[np.array(nu, dtype=int)],
+                proj_pop[np.array(nv, dtype=int)],
             )
 
+        # --- Per-agent kappa: minimum incident ORC ---
         kappa = np.zeros(N_active)
         x_explore = np.array([pop[i].copy() for i in range(N_active)])
+        explore_valid = np.zeros(N_active, dtype=bool)
 
         for ei, (u, v) in enumerate(edges):
             for agent_idx, other_idx in [(u, v), (v, u)]:
@@ -191,87 +210,76 @@ class _CurvatureField:
                     continue
                 if orc_edge[ei] < kappa[agent_idx]:
                     kappa[agent_idx] = orc_edge[ei]
+                    # Fitness-gated softmin-centroid explore target.
+                    # Only cross the saddle when the other community is
+                    # genuinely better. Prevents:
+                    # (a) ridge agents exploring toward worse off-ridge regions
+                    # (b) unimodal agents chasing phantom community structure
                     other_nbrs = nbrs_list[other_idx]
-                    # Fitness-gated: only explore toward a community that is
-                    # genuinely better than the current agent.  This prevents
-                    # spurious saddle crossings on narrow-valley / ridge
-                    # functions where off-ridge communities are *worse*.
                     if other_nbrs:
                         nbr_arr = np.array(other_nbrs, dtype=int)
                         nbr_fits = aug_fit[nbr_arr]
-                        # Only cross the saddle if the other community is better
-                        if nbr_fits.min() < aug_fit[agent_idx]:  # any better neighbour is enough
-                            # Softmin-weighted centroid: weight by exp(-f/sigma)
-                            # so the best agents in the other basin pull hardest
+                        if nbr_fits.min() < aug_fit[agent_idx]:
                             shifted = nbr_fits - nbr_fits.min()
                             sigma = max(shifted.std(), 1e-10)
                             w = np.exp(-shifted / sigma)
                             w /= w.sum()
                             x_explore[agent_idx] = (aug_pop[nbr_arr] * w[:, None]).sum(axis=0)
+                            explore_valid[agent_idx] = True
                     else:
                         if aug_fit[other_idx] < aug_fit[agent_idx]:
                             x_explore[agent_idx] = aug_pop[other_idx].copy()
+                            explore_valid[agent_idx] = True
 
         self._kappa = kappa
         self._x_explore = x_explore
-        # Effective threshold (static or annealed)
-        eff_thresh = self.orc_threshold
-        if self.adaptive_threshold and self._fe_count_ref is not None:
-            progress = min(1.0, self._fe_count_ref[0] / self.max_fe)
-            eff_thresh = -0.10 - 0.50 * progress
-            self.orc_threshold = eff_thresh
-        self.n_explore_agents = int((kappa < eff_thresh).sum())
+        self._explore_valid = explore_valid
         self.mean_kappa = float(kappa.mean()) if N_active else 0.0
+        self.n_clusters = int(explore_valid.sum())  # diagnostic: agents with valid explore
         return kappa, x_explore
 
 
 # ---------------------------------------------------------------------------
-# ORC-SHADE
+# ORC-SHADE v2
 # ---------------------------------------------------------------------------
 
 class ORCSHADE:
     """
-    ORC-SHADE: Curvature-Modulated Differential Evolution.
+    ORC-SHADE v2: Curvature-Modulated Differential Evolution.
 
-    All L-SHADE mechanics are preserved (success-history parameter adaptation,
-    external archive, LPSR / NL-SHADE nonlinear schedule). The only structural
-    change is in the mutation operator: agents on topological saddles use
-    current-to-explore/1 instead of current-to-pbest/1.
+    All L-SHADE mechanics preserved (success-history adaptation, external
+    archive, nonlinear population size reduction). The mutation operator uses
+    a continuous curvature-modulated blend: agents on topological saddles
+    (kappa < 0) with a fitness-gated explore target get alpha > 0, steering
+    them toward the better neighboring community. All others use pure
+    current-to-pbest/1, identical to NL-SHADE.
 
     Parameters
     ----------
-    problem           : object with .evaluate(x)->float and .bounds=[lb,ub]
-    dim               : problem dimensionality
-    pop_size          : initial population (default 18*dim)
-    max_fe            : function evaluation budget
-    pop_size_min      : minimum population after LPSR (default 4)
-    H                 : success-history length (default 6)
-    orc_k             : k-NN degree for ORC computation (default 5)
-    orc_threshold     : kappa below which agent explores (default -0.30)
-    orc_update_period : recompute curvature every N generations (default 3)
-    orc_lambda        : F-boost multiplier for saddle agents (default 0.5)
-    ghost_size        : historical reservoir capacity (default 18*dim)
-    pop_schedule      : 'nonlinear' (NL-SHADE, default) or 'linear' (L-SHADE)
-    max_explore_frac  : max fraction of agents that can use explore mutation (default 0.25)
-    adaptive_threshold: if True, anneal threshold from -0.10 to -0.60 over the run (default False)
+    problem          : object with .evaluate(x)->float and .bounds=[lb, ub]
+    dim              : problem dimensionality
+    pop_size         : initial population (default 18*dim)
+    max_fe           : function evaluation budget
+    pop_size_min     : minimum population after LPSR (default 4)
+    H                : success-history length (default 6)
+    orc_update_period: recompute curvature every N generations (default 3)
+    ghost_size       : historical reservoir capacity (default 18*dim)
+    pop_schedule     : "nonlinear" (NL-SHADE, default) or "linear"
+    kappa_scale      : curvature normalization. alpha = clip(|kappa|/kappa_scale, 0, 1).
+                       ORC bounded in [-1, 1], so kappa_scale=1.0 spans the full range.
     """
 
     def __init__(self, problem, dim, pop_size=None, max_fe=200_000,
-                 pop_size_min=4, H=6, orc_k=5, orc_threshold=-0.30,
-                 orc_update_period=3, orc_lambda=0.5, ghost_size=None,
-                 pop_schedule='nonlinear',
-                 max_explore_frac=0.25,
-                 adaptive_threshold=False):
+                 pop_size_min=4, H=6, orc_update_period=3, ghost_size=None,
+                 pop_schedule="nonlinear", kappa_scale=1.0):
         self.problem = problem
         self.dim = dim
         self.pop_size_init = pop_size if pop_size is not None else 18 * dim
         self.pop_size_min = max(pop_size_min, 4)
         self.max_fe = max_fe
         self.H = H
-        self.orc_lambda = orc_lambda
         self.pop_schedule = pop_schedule
-        self.max_explore_frac = max_explore_frac
-        self.adaptive_threshold = adaptive_threshold
+        self.kappa_scale = kappa_scale
 
         lb, ub = float(problem.bounds[0]), float(problem.bounds[1])
         self.lb = lb
@@ -298,17 +306,14 @@ class ORCSHADE:
         self.archive_max_size = self.pop_size_init
 
         self.generation = 0
-        self.total_explore_mutations = 0
-        self.total_exploit_mutations = 0
-        # Convergence log: [(fe_count, best_fitness), ...] at each step
+        self._total_alpha = 0.0
+        self._total_mutations = 0
+        self._last_mean_alpha = 0.0
         self.convergence_log: list = [(self.fe_count, self.best_fitness)]
 
         self._curv = _CurvatureField(
-            dim=dim, k=orc_k, orc_threshold=orc_threshold,
-            update_period=orc_update_period, ghost_size=ghost_size,
-            adaptive_threshold=adaptive_threshold, max_fe=max_fe,
+            dim=dim, update_period=orc_update_period, ghost_size=ghost_size,
         )
-        self._curv._fe_count_ref = [self.fe_count]
 
     # ------------------------------------------------------------------
     # L-SHADE parameter generation
@@ -360,8 +365,8 @@ class ORCSHADE:
         if N < 4:
             return self.best_fitness
 
-        self._curv._fe_count_ref[0] = self.fe_count
         kappa, x_explore = self._curv.compute(self.pop, self.fitness, self.generation)
+        ev = self._curv._explore_valid
         F_vals = self._gen_F(N)
         CR_vals = self._gen_CR(N)
 
@@ -374,57 +379,45 @@ class ORCSHADE:
         new_pop = np.empty_like(self.pop)
         new_fit = np.empty(N)
         suc_F, suc_CR, suc_delta = [], [], []
-        threshold = self._curv.orc_threshold
-
-        # Build explore mask: only the most negatively curved agents, capped
-        # at max_explore_frac * N to preserve enough exploitation bandwidth.
-        explore_mask = np.zeros(N, dtype=bool)
-        saddle_idx = np.where(kappa < threshold)[0]
-        if len(saddle_idx) > 0:
-            max_explorers = max(1, int(round(self.max_explore_frac * N)))
-            if len(saddle_idx) <= max_explorers:
-                explore_mask[saddle_idx] = True
-            else:
-                # Pick the most negatively curved (genuine saddles first)
-                most_neg = saddle_idx[np.argsort(kappa[saddle_idx])[:max_explorers]]
-                explore_mask[most_neg] = True
+        total_alpha = 0.0
 
         for i in range(N):
             Fi = F_vals[i]
-            CRi = CR_vals[i]
+            CR_i = CR_vals[i]
 
-            if explore_mask[i] and not np.allclose(x_explore[i], self.pop[i]):
-                # EXPLORE: current-to-explore/1 with curvature-boosted F
-                F_exp = min(1.0, Fi * (1.0 + self.orc_lambda * abs(float(kappa[i]))))
-                r1 = i
-                while r1 == i:
-                    r1 = np.random.randint(0, N)
-                r2 = i
-                while r2 == i or r2 == r1:
-                    r2 = np.random.randint(0, len(combined))
-                mutant = (self.pop[i]
-                          + F_exp * (x_explore[i] - self.pop[i])
-                          + Fi * (self.pop[r1] - combined[r2]))
-                self.total_explore_mutations += 1
-            else:
-                # EXPLOIT: current-to-pbest/1
-                pbest_idx = sorted_idx[np.random.randint(0, p_count)]
-                r1 = i
-                while r1 == i:
-                    r1 = np.random.randint(0, N)
-                r2 = i
-                while r2 == i or r2 == r1:
-                    r2 = np.random.randint(0, len(combined))
-                mutant = (self.pop[i]
-                          + Fi * (self.pop[pbest_idx] - self.pop[i])
-                          + Fi * (self.pop[r1] - combined[r2]))
-                self.total_exploit_mutations += 1
+            # Curvature -> continuous exploration intensity.
+            # alpha>0 only when: (a) kappa<0 (saddle boundary) AND
+            # (b) fitness-gated explore target exists (ev[i]).
+            # When neither condition holds, alpha=0 and the mutation is
+            # identical to standard current-to-pbest/1 (NL-SHADE).
+            ki = float(kappa[i])
+            explore_active = (i < len(ev) and bool(ev[i]))
+            alpha_i = (np.clip(abs(ki) / self.kappa_scale, 0.0, 1.0)
+                       if ki < 0.0 and explore_active else 0.0)
+            total_alpha += alpha_i
+
+            pbest_idx = sorted_idx[np.random.randint(0, p_count)]
+            r1 = i
+            while r1 == i:
+                r1 = np.random.randint(0, N)
+            r2 = i
+            while r2 == i or r2 == r1:
+                r2 = np.random.randint(0, len(combined))
+
+            # Unified mutation: continuous blend of pbest and explore targets.
+            # CR is left to SHADE adaptation -- no modulation needed because
+            # the fitness gate ensures explore targets are only set when
+            # the other community is genuinely better (not just different).
+            target = alpha_i * x_explore[i] + (1.0 - alpha_i) * self.pop[pbest_idx]
+            mutant = (self.pop[i]
+                      + Fi * (target - self.pop[i])
+                      + Fi * (self.pop[r1] - combined[r2]))
 
             mutant = self._bounce(mutant.copy(), self.pop[i])
             j_rand = np.random.randint(0, self.dim)
             trial = self.pop[i].copy()
             for d in range(self.dim):
-                if np.random.rand() < CRi or d == j_rand:
+                if np.random.rand() < CR_i or d == j_rand:
                     trial[d] = mutant[d]
 
             f_trial = float(self.problem.evaluate(trial))
@@ -433,9 +426,14 @@ class ORCSHADE:
             if f_trial <= self.fitness[i]:
                 if f_trial < self.fitness[i]:
                     self.archive.append(self.pop[i].copy())
-                    suc_F.append(Fi)
-                    suc_CR.append(CRi)
-                    suc_delta.append(self.fitness[i] - f_trial)
+                    # Only pure exploitation trials update SHADE history.
+                    # Explore trials (alpha>0) use different target geometry
+                    # and would contaminate CR adaptation (e.g. ridge functions
+                    # need low CR; early cross-saddle successes would push CR up).
+                    if alpha_i == 0.0:
+                        suc_F.append(Fi)
+                        suc_CR.append(CR_i)
+                        suc_delta.append(self.fitness[i] - f_trial)
                 new_pop[i] = trial
                 new_fit[i] = f_trial
                 if f_trial < self.best_fitness:
@@ -453,6 +451,9 @@ class ORCSHADE:
 
         self.pop = new_pop
         self.fitness = new_fit
+        self._last_mean_alpha = total_alpha / max(N, 1)
+        self._total_alpha += total_alpha
+        self._total_mutations += N
 
         if suc_F:
             w = np.array(suc_delta)
@@ -465,7 +466,7 @@ class ORCSHADE:
             self.archive.pop(np.random.randint(0, len(self.archive)))
 
         progress = self.fe_count / self.max_fe
-        if self.pop_schedule == 'nonlinear':
+        if self.pop_schedule == "nonlinear":
             new_size = int(round(
                 self.pop_size_min
                 + (self.pop_size_init - self.pop_size_min) * (1.0 - progress ** 4)
@@ -495,15 +496,17 @@ class ORCSHADE:
         return self.best_solution, self.best_fitness
 
     def get_run_stats(self):
-        total = self.total_explore_mutations + self.total_exploit_mutations
+        total = max(self._total_mutations, 1)
+        mean_alpha = self._total_alpha / total
         return {
-            'best_fitness': self.best_fitness,
-            'fe_count': self.fe_count,
-            'generations': self.generation,
-            'explore_mutations': self.total_explore_mutations,
-            'exploit_mutations': self.total_exploit_mutations,
-            'explore_pct': 100.0 * self.total_explore_mutations / max(total, 1),
-            'mean_kappa': self._curv.mean_kappa,
-            'n_explore_agents': self._curv.n_explore_agents,
-            'effective_threshold': float(self._curv.orc_threshold),
+            "best_fitness": self.best_fitness,
+            "fe_count": self.fe_count,
+            "generations": self.generation,
+            "explore_pct": 100.0 * mean_alpha,
+            "mean_alpha": mean_alpha,
+            "last_mean_alpha": self._last_mean_alpha,
+            "n_clusters": self._curv.n_clusters,
+            "mean_kappa": float(self._curv.mean_kappa),
+            "effective_threshold": 0.0,
+            "n_explore_agents": int(self._curv._explore_valid.sum()),
         }
