@@ -75,22 +75,22 @@ VARIANTS: dict = {
         "cls": "NLSHADE",
         "kwargs": {},
     },
-    # ORC-SHADE v2: default (kappa_scale=1.0)
+    # ORC-SHADE v2: full algorithm (kappa_min=0.15, p_elite=0.2 are defaults)
     "ORC-SHADE": {
         "cls": "ORCSHADE",
-        "kwargs": {"kappa_scale": 1.0},
+        "kwargs": {},
     },
-    # Ablation: more aggressive blending (alpha grows faster)
-    "ORC-SHADE[ks=0.5]": {
+    # Ablation A: no kappa threshold (fires on all negative curvature incl. noise)
+    "ORC-SHADE[km=0]": {
         "cls": "ORCSHADE",
-        "kwargs": {"kappa_scale": 0.5},
+        "kwargs": {"kappa_min": 0.0},
     },
-    # Ablation: more conservative blending (alpha grows slower)
-    "ORC-SHADE[ks=2.0]": {
+    # Ablation B: no elite protection (all agents can explore)
+    "ORC-SHADE[pe=0]": {
         "cls": "ORCSHADE",
-        "kwargs": {"kappa_scale": 2.0},
+        "kwargs": {"p_elite": 0.0},
     },
-    # Ablation: ORC disabled (kappa_scale huge => alpha ~0 => pure NL-SHADE clone)
+    # Ablation C: ORC disabled (kappa_scale huge => alpha=0 always => NL-SHADE clone)
     "ORC-SHADE[no-orc]": {
         "cls": "ORCSHADE",
         "kwargs": {"kappa_scale": 999.0},
@@ -193,8 +193,10 @@ def _run_one(args: tuple) -> dict:
         st = opt.get_run_stats()
         row["explore_pct"] = round(st.get("explore_pct", 0.0), 2)
         row["mean_kappa"] = round(st.get("mean_kappa", 0.0), 4)
-        row["effective_threshold"] = round(st.get("effective_threshold", 0.0), 4)
+        row["effective_threshold"] = round(st.get("kappa_min", 0.0), 4)
         row["n_explore_agents"] = st.get("n_explore_agents", 0)
+        row["M_CR_exploit"] = round(st.get("M_CR_exploit", 0.5), 3)
+        row["M_CR_explore"] = round(st.get("M_CR_explore", 0.8), 3)
 
     return row
 
