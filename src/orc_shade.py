@@ -271,7 +271,8 @@ class ORCSHADE:
 
     def __init__(self, problem, dim, pop_size=None, max_fe=200_000,
                  pop_size_min=4, H=6, orc_update_period=3, ghost_size=None,
-                 pop_schedule="nonlinear", kappa_scale=1.0):
+                 pop_schedule="nonlinear", kappa_scale=1.0,
+                 kappa_min=0.15, p_elite=0.2):
         self.problem = problem
         self.dim = dim
         self.pop_size_init = pop_size if pop_size is not None else 18 * dim
@@ -279,7 +280,9 @@ class ORCSHADE:
         self.max_fe = max_fe
         self.H = H
         self.pop_schedule = pop_schedule
-        self.kappa_scale = kappa_scale
+        self.kappa_scale = max(kappa_scale, kappa_min + 1e-6)
+        self.kappa_min = kappa_min
+        self.p_elite = p_elite
 
         lb, ub = float(problem.bounds[0]), float(problem.bounds[1])
         self.lb = lb
@@ -299,9 +302,14 @@ class ORCSHADE:
         self.best_fitness = float(self.fitness[best_idx])
         self.best_solution = self.pop[best_idx].copy()
 
+        # Exploit history prior: M_CR=0.5 (NL-SHADE standard)
+        # Explore history prior: M_CR=0.8 (cross-saddle needs high CR)
         self.M_F = np.full(H, 0.5)
         self.M_CR = np.full(H, 0.5)
+        self.M_F_explore = np.full(H, 0.5)
+        self.M_CR_explore = np.full(H, 0.8)
         self._hist_ptr = 0
+        self._hist_ptr_explore = 0
         self.archive = []
         self.archive_max_size = self.pop_size_init
 
@@ -319,23 +327,19 @@ class ORCSHADE:
     # L-SHADE parameter generation
     # ------------------------------------------------------------------
 
-    def _gen_F(self, size):
-        F = np.empty(size)
-        for i in range(size):
+    def _gen_F_one(self, mem):
+        """Draw one F from Cauchy distribution centred on mem[r]."""
+        while True:
             r = np.random.randint(0, self.H)
-            while True:
-                Fi = np.random.standard_cauchy() * 0.1 + self.M_F[r]
-                if Fi > 0:
-                    break
-            F[i] = min(Fi, 1.0)
-        return F
+            Fi = np.random.standard_cauchy() * 0.1 + mem[r]
+            if Fi > 0:
+                break
+        return min(Fi, 1.0)
 
-    def _gen_CR(self, size):
-        CR = np.empty(size)
-        for i in range(size):
-            r = np.random.randint(0, self.H)
-            CR[i] = np.clip(np.random.normal(self.M_CR[r], 0.1), 0.0, 1.0)
-        return CR
+    def _gen_CR_one(self, mem):
+        """Draw one CR from Gaussian distribution centred on mem[r]."""
+        r = np.random.randint(0, self.H)
+        return float(np.clip(np.random.normal(mem[r], 0.1), 0.0, 1.0))
 
     def _lehmer(self, vals, w):
         v, w = np.array(vals), np.array(w)
@@ -367,34 +371,48 @@ class ORCSHADE:
 
         kappa, x_explore = self._curv.compute(self.pop, self.fitness, self.generation)
         ev = self._curv._explore_valid
-        F_vals = self._gen_F(N)
-        CR_vals = self._gen_CR(N)
+
+        sorted_idx = np.argsort(self.fitness)
+
+        # Fix 2 -- elite mask: top p_elite fraction always exploits.
+        # These agents are the pbest anchors; exploring from there
+        # destabilises their role as gradient attractors for the swarm.
+        n_elite = max(1, int(round(self.p_elite * N)))
+        elite_set = set(int(x) for x in sorted_idx[:n_elite])
 
         p = max(2.0 / N, 0.2)
         p_count = max(2, int(round(p * N)))
-        sorted_idx = np.argsort(self.fitness)
         combined = (np.vstack([self.pop, np.array(self.archive)])
                     if self.archive else self.pop.copy())
 
         new_pop = np.empty_like(self.pop)
         new_fit = np.empty(N)
-        suc_F, suc_CR, suc_delta = [], [], []
+        suc_F_ex,  suc_CR_ex,  suc_d_ex  = [], [], []   # exploitation
+        suc_F_xp,  suc_CR_xp,  suc_d_xp  = [], [], []   # exploration
         total_alpha = 0.0
 
-        for i in range(N):
-            Fi = F_vals[i]
-            CR_i = CR_vals[i]
+        kappa_range = max(self.kappa_scale - self.kappa_min, 1e-6)
 
-            # Curvature -> continuous exploration intensity.
-            # alpha>0 only when: (a) kappa<0 (saddle boundary) AND
-            # (b) fitness-gated explore target exists (ev[i]).
-            # When neither condition holds, alpha=0 and the mutation is
-            # identical to standard current-to-pbest/1 (NL-SHADE).
+        for i in range(N):
             ki = float(kappa[i])
             explore_active = (i < len(ev) and bool(ev[i]))
-            alpha_i = (np.clip(abs(ki) / self.kappa_scale, 0.0, 1.0)
-                       if ki < 0.0 and explore_active else 0.0)
+
+            # Fix 1 + Fix 2: alpha > 0 only for non-elite agents whose ORC
+            # signal is above the Wasserstein estimator noise floor kappa_min.
+            if ki < -self.kappa_min and explore_active and i not in elite_set:
+                alpha_i = float(np.clip(
+                    (abs(ki) - self.kappa_min) / kappa_range, 0.0, 1.0))
+            else:
+                alpha_i = 0.0
             total_alpha += alpha_i
+
+            # Fix 3: draw F/CR from the mode-appropriate SHADE history.
+            if alpha_i > 0.0:
+                Fi   = self._gen_F_one(self.M_F_explore)
+                CR_i = self._gen_CR_one(self.M_CR_explore)
+            else:
+                Fi   = self._gen_F_one(self.M_F)
+                CR_i = self._gen_CR_one(self.M_CR)
 
             pbest_idx = sorted_idx[np.random.randint(0, p_count)]
             r1 = i
@@ -404,10 +422,7 @@ class ORCSHADE:
             while r2 == i or r2 == r1:
                 r2 = np.random.randint(0, len(combined))
 
-            # Unified mutation: continuous blend of pbest and explore targets.
-            # CR is left to SHADE adaptation -- no modulation needed because
-            # the fitness gate ensures explore targets are only set when
-            # the other community is genuinely better (not just different).
+            # Continuous blend; alpha=0 is identical to current-to-pbest/1.
             target = alpha_i * x_explore[i] + (1.0 - alpha_i) * self.pop[pbest_idx]
             mutant = (self.pop[i]
                       + Fi * (target - self.pop[i])
@@ -426,14 +441,11 @@ class ORCSHADE:
             if f_trial <= self.fitness[i]:
                 if f_trial < self.fitness[i]:
                     self.archive.append(self.pop[i].copy())
-                    # Only pure exploitation trials update SHADE history.
-                    # Explore trials (alpha>0) use different target geometry
-                    # and would contaminate CR adaptation (e.g. ridge functions
-                    # need low CR; early cross-saddle successes would push CR up).
+                    delta = self.fitness[i] - f_trial
                     if alpha_i == 0.0:
-                        suc_F.append(Fi)
-                        suc_CR.append(CR_i)
-                        suc_delta.append(self.fitness[i] - f_trial)
+                        suc_F_ex.append(Fi);  suc_CR_ex.append(CR_i);  suc_d_ex.append(delta)
+                    else:
+                        suc_F_xp.append(Fi);  suc_CR_xp.append(CR_i);  suc_d_xp.append(delta)
                 new_pop[i] = trial
                 new_fit[i] = f_trial
                 if f_trial < self.best_fitness:
@@ -455,21 +467,32 @@ class ORCSHADE:
         self._total_alpha += total_alpha
         self._total_mutations += N
 
-        if suc_F:
-            w = np.array(suc_delta)
-            w = w / (w.sum() + 1e-30)
-            self.M_F[self._hist_ptr] = self._lehmer(suc_F, w)
-            self.M_CR[self._hist_ptr] = self._wmean(suc_CR, w)
+        # Update exploit SHADE history (alpha=0 successes only)
+        if suc_F_ex:
+            w = np.array(suc_d_ex); w /= (w.sum() + 1e-30)
+            self.M_F[self._hist_ptr]  = self._lehmer(suc_F_ex, w)
+            self.M_CR[self._hist_ptr] = self._wmean(suc_CR_ex, w)
             self._hist_ptr = (self._hist_ptr + 1) % self.H
+
+        # Update explore SHADE history (alpha>0 successes only)
+        if suc_F_xp:
+            w = np.array(suc_d_xp); w /= (w.sum() + 1e-30)
+            self.M_F_explore[self._hist_ptr_explore]  = self._lehmer(suc_F_xp, w)
+            self.M_CR_explore[self._hist_ptr_explore] = self._wmean(suc_CR_xp, w)
+            self._hist_ptr_explore = (self._hist_ptr_explore + 1) % self.H
 
         while len(self.archive) > self.archive_max_size:
             self.archive.pop(np.random.randint(0, len(self.archive)))
 
         progress = self.fe_count / self.max_fe
         if self.pop_schedule == "nonlinear":
+            # Concave schedule matching NL-SHADE exactly:
+            # N(t) = N_max + (N_min - N_max) * t^(1/4)
+            # At t=0.5 -> ~84% of pop already removed; fast early collapse
+            # preserves many exploitation generations at the end.
             new_size = int(round(
-                self.pop_size_min
-                + (self.pop_size_init - self.pop_size_min) * (1.0 - progress ** 4)
+                self.pop_size_init
+                + (self.pop_size_min - self.pop_size_init) * (progress ** 0.25)
             ))
         else:
             new_size = int(round(
@@ -485,6 +508,7 @@ class ORCSHADE:
         self.convergence_log.append((self.fe_count, self.best_fitness))
         return self.best_fitness
 
+
     # ------------------------------------------------------------------
     # Convenience API
     # ------------------------------------------------------------------
@@ -499,14 +523,16 @@ class ORCSHADE:
         total = max(self._total_mutations, 1)
         mean_alpha = self._total_alpha / total
         return {
-            "best_fitness": self.best_fitness,
-            "fe_count": self.fe_count,
-            "generations": self.generation,
-            "explore_pct": 100.0 * mean_alpha,
-            "mean_alpha": mean_alpha,
-            "last_mean_alpha": self._last_mean_alpha,
-            "n_clusters": self._curv.n_clusters,
-            "mean_kappa": float(self._curv.mean_kappa),
-            "effective_threshold": 0.0,
+            "best_fitness":     self.best_fitness,
+            "fe_count":         self.fe_count,
+            "generations":      self.generation,
+            "explore_pct":      100.0 * mean_alpha,
+            "mean_alpha":       mean_alpha,
+            "last_mean_alpha":  self._last_mean_alpha,
             "n_explore_agents": int(self._curv._explore_valid.sum()),
+            "mean_kappa":       float(self._curv.mean_kappa),
+            "kappa_min":        self.kappa_min,
+            "p_elite":          self.p_elite,
+            "M_CR_exploit":     float(self.M_CR.mean()),
+            "M_CR_explore":     float(self.M_CR_explore.mean()),
         }
