@@ -287,7 +287,7 @@ class ORCSHADE:
     """
 
     def __init__(self, problem, dim, pop_size=None, max_fe=200_000,
-                 pop_size_min=4, H=6, orc_update_period=3, ghost_size=None,
+                 pop_size_min=4, H=6, orc_update_period=5, ghost_size=None,
                  pop_schedule="nonlinear", kappa_scale=1.0,
                  kappa_min=0.15, p_elite=0.2):
         self.problem = problem
@@ -339,6 +339,8 @@ class ORCSHADE:
         self._curv = _CurvatureField(
             dim=dim, update_period=orc_update_period, ghost_size=ghost_size,
         )
+        self._base_update_period = orc_update_period
+        self._idle_streak = 0
 
     # ------------------------------------------------------------------
     # L-SHADE parameter generation
@@ -483,6 +485,18 @@ class ORCSHADE:
         self._last_mean_alpha = total_alpha / max(N, 1)
         self._total_alpha += total_alpha
         self._total_mutations += N
+
+        # Adaptive ORC frequency: if exploration has been idle for many
+        # consecutive generations, double the update period (up to 40).
+        # Resets immediately when exploration fires again.
+        if self._last_mean_alpha < 0.001:
+            self._idle_streak += 1
+            if self._idle_streak >= 10:
+                self._curv.update_period = min(
+                    self._base_update_period * (2 ** (self._idle_streak // 10)), 40)
+        else:
+            self._idle_streak = 0
+            self._curv.update_period = self._base_update_period
 
         # Update exploit SHADE history (alpha=0 successes only)
         if suc_F_ex:
