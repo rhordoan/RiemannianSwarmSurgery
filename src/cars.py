@@ -130,7 +130,8 @@ class CurvatureMonitor:
 
     def _lift(self, pop, fitness):
         spatial_std = max(pop.std(), 1e-10)
-        log_fit = np.log1p(np.maximum(fitness, 0.0))
+        shifted = fitness - fitness.min() + 1.0
+        log_fit = np.log(shifted)
         log_fit_std = max(log_fit.std(), 1e-10)
         fit_col = (self.gamma * log_fit / log_fit_std)[:, np.newaxis]
         return np.hstack([pop / spatial_std, fit_col])
@@ -139,7 +140,8 @@ class CurvatureMonitor:
         """Per-dimension normalization for probe populations."""
         per_dim_std = np.maximum(np.std(probes, axis=0), 1e-10)
         spatial = probes / per_dim_std
-        log_fit = np.log1p(np.maximum(fitness, 0.0))
+        shifted = fitness - fitness.min() + 1.0
+        log_fit = np.log(shifted)
         fit_std = max(float(np.std(log_fit)), 1e-10)
         fit_col = (self.gamma * log_fit / fit_std)[:, np.newaxis]
         return np.hstack([spatial, fit_col])
@@ -274,7 +276,7 @@ class CARS:
     """
 
     def __init__(self, problem, dim, max_fe=300_000,
-                 pop_size=None, orc_period=25, stag_gens=None,
+                 pop_size=None, orc_period=25, stag_patience=None,
                  n_exclude_dims=None, verbose=False):
         self.problem = problem
         self.dim = dim
@@ -289,7 +291,7 @@ class CARS:
 
         ps = pop_size or 18 * dim
         self.initial_pop_size = ps
-        self.stag_gens = stag_gens or max(50, 3 * dim)
+        self.stag_patience = stag_patience or max(ps * 50, 3000)
         self._min_segment_fes = ps * 20
         n_excl = n_exclude_dims or max(3, int(np.ceil(dim * 0.15)))
         self.n_exclude_dims = min(n_excl, dim // 2)
@@ -308,18 +310,18 @@ class CARS:
         self.best_solution = self._nlshade.best_solution.copy()
 
         self._best_at_last_check = self.best_fitness
-        self._gens_without_improvement = 0
-        self._base_stag_gens = self.stag_gens
-        self._current_stag_gens = self.stag_gens
+        self._fes_without_improvement = 0
+        self._base_stag_fes = self.stag_patience
+        self._current_stag_fes = self.stag_patience
         self._best_before_restart = self.best_fitness
         self._n_restarts = 0
         self._heartbeat_counter = 0
 
         if self.verbose:
             _log.info(
-                "INIT  D=%d  max_fe=%d  pop=%d  stag=%d  "
+                "INIT  D=%d  max_fe=%d  pop=%d  stag_fes=%d  "
                 "n_excl=%d  init_best=%.4e",
-                dim, max_fe, ps, self.stag_gens,
+                dim, max_fe, ps, self.stag_patience,
                 self.n_exclude_dims, self.best_fitness,
             )
 
@@ -335,11 +337,13 @@ class CARS:
         convergence_log = [(self.fe_count, self.best_fitness)]
 
         while self.fe_count < self.max_fe:
+            fe_before = self.fe_count
             for _ in range(self.orc_period):
                 if self.fe_count >= self.max_fe:
                     break
                 self._nlshade.step()
                 self._sync_best()
+            fe_spent = self.fe_count - fe_before
 
             convergence_log.append((self.fe_count, self.best_fitness))
 
@@ -347,10 +351,10 @@ class CARS:
                 break
 
             if self.best_fitness < self._best_at_last_check - 1e-12:
-                self._gens_without_improvement = 0
+                self._fes_without_improvement = 0
                 self._best_at_last_check = self.best_fitness
             else:
-                self._gens_without_improvement += self.orc_period
+                self._fes_without_improvement += fe_spent
 
             self._heartbeat_counter += 1
             if self.verbose and self._heartbeat_counter % 10 == 0:
@@ -359,15 +363,15 @@ class CARS:
                 spread = float(np.mean(np.std(pop, axis=0)))
                 _log.info(
                     "HEART  fe=%d/%d  best=%.4e  pop=%d  "
-                    "spread=%.2f  fit=[%.4e, %.4e]  stag=%d/%d",
+                    "spread=%.2f  fit=[%.4e, %.4e]  stag_fes=%d/%d",
                     self.fe_count, self.max_fe, self.best_fitness,
                     len(pop), spread, float(fit.min()), float(fit.max()),
-                    self._gens_without_improvement,
-                    self._current_stag_gens,
+                    self._fes_without_improvement,
+                    self._current_stag_fes,
                 )
 
-            stagnating = (self._gens_without_improvement
-                          >= self._current_stag_gens)
+            stagnating = (self._fes_without_improvement
+                          >= self._current_stag_fes)
             pop = self._nlshade.pop
             fit = self._nlshade.fitness
 
@@ -416,11 +420,14 @@ class CARS:
                     self.fe_count, old, self.best_fitness, dist_str,
                 )
 
-    def _select_exclusion_dims(self):
+    def _run_landscape_probe(self):
         """
         Use ORC Landscape Probing to identify dimensions where the
         fitness landscape has basin transitions (negative curvature).
-        Falls back to heuristic if probing finds no negative curvature.
+
+        Returns (bias_dims, bias_directions, curvature_profile, probe_info).
+        bias_directions[d] is +1 or -1 indicating which direction to push
+        the restart population along dimension d.
         """
         curvature_profile, n_evals, probe_info = (
             self.monitor.probe_curvature_profile(
@@ -428,9 +435,9 @@ class CARS:
             )
         )
         self._nlshade.fe_count += n_evals
+        asym = probe_info["fitness_asymmetry"]
 
         if self.verbose:
-            asym = probe_info["fitness_asymmetry"]
             fmin, fmax = probe_info["probe_fitness_range"]
             _log.info(
                 "PROBE  center_f=%.4e  probe_range=[%.4e, %.4e]  "
@@ -470,13 +477,21 @@ class CARS:
                 extremeness = np.abs(self.best_solution - self.domain_center)
                 dims = np.argsort(-extremeness)[:n]
 
+        bias_directions = np.zeros(self.dim)
+        for d in dims:
+            if abs(asym[d]) > 1e-12:
+                bias_directions[d] = -np.sign(asym[d])
+            else:
+                bias_directions[d] = (
+                    -1.0 if self.best_solution[d] > self.domain_center else 1.0
+                )
+
         if self.verbose:
             excl_parts = []
             for d in dims:
-                side = "upper" if self.best_solution[d] > self.domain_center else "lower"
-                kept = "lower" if side == "upper" else "upper"
+                direction = "+" if bias_directions[d] > 0 else "-"
                 excl_parts.append(
-                    f"d{d}(x*={self.best_solution[d]:+.1f}, keep={kept}, "
+                    f"d{d}(x*={self.best_solution[d]:+.1f}, bias={direction}, "
                     f"kappa={curvature_profile[d]:+.4f})"
                 )
             _log.info(
@@ -484,7 +499,7 @@ class CARS:
                 method, ", ".join(excl_parts),
             )
 
-        return dims
+        return dims, bias_directions
 
     def _generate_obl_population(self, lb_arr, ub_arr, n_obl):
         """Generate opposition-based restart individuals."""
@@ -501,7 +516,8 @@ class CARS:
         if not self.archived_bests:
             return pop
         domain_diag = float(np.linalg.norm(ub_arr - lb_arr))
-        min_dist = 0.1 * domain_diag / np.sqrt(self.dim)
+        radius_scale = 0.15 if self._n_restarts >= 2 else 0.1
+        min_dist = radius_scale * domain_diag / np.sqrt(self.dim)
         centers = np.array(self.archived_bests)
         for i in range(len(pop)):
             for _ in range(max_retries):
@@ -512,17 +528,18 @@ class CARS:
         return pop
 
     def _do_restart(self):
-        """ORC-probed dimensional exclusion restart with OBL seeding."""
+        """ORC-probed ball-exclusion restart with directional bias."""
         self._n_restarts += 1
 
         improved = self.best_fitness < self._best_before_restart - 1e-12
         if not improved:
-            self._current_stag_gens = min(
-                self._current_stag_gens * 2,
-                self._base_stag_gens * 8,
+            self._current_stag_fes = min(
+                self._current_stag_fes * 2,
+                self._base_stag_fes * 8,
+                int((self.max_fe - self.fe_count) * 0.5),
             )
         else:
-            self._current_stag_gens = self._base_stag_gens
+            self._current_stag_fes = self._base_stag_fes
 
         if self.verbose:
             dists = self._basin_distances(self.best_solution)
@@ -534,7 +551,7 @@ class CARS:
                 "RESTART #%d  fe=%d  error=%.4e  improved=%s  "
                 "patience=%d  dist_prev=[%s]",
                 self._n_restarts, self.fe_count, self.best_fitness,
-                improved, self._current_stag_gens, dist_str,
+                improved, self._current_stag_fes, dist_str,
             )
 
         self.archived_bests.append(self.best_solution.copy())
@@ -542,15 +559,10 @@ class CARS:
             (self.fe_count, self.best_fitness, self._n_restarts)
         )
 
-        dims = self._select_exclusion_dims()
+        bias_dims, bias_directions = self._run_landscape_probe()
+
         lb_new = np.full(self.dim, self.lb)
         ub_new = np.full(self.dim, self.ub)
-
-        for d in dims:
-            if self.best_solution[d] > self.domain_center:
-                ub_new[d] = self.domain_center
-            else:
-                lb_new[d] = self.domain_center
 
         ps = self.initial_pop_size
         n_obl = ps // 2
@@ -565,18 +577,26 @@ class CARS:
             lhs_pop = np.random.uniform(lb_new, ub_new, (n_lhs, self.dim))
 
         seed_pop = np.vstack([obl_pop, lhs_pop])
+
+        domain_range = self.ub - self.lb
+        for d in bias_dims:
+            if bias_directions[d] == 0:
+                continue
+            shift = bias_directions[d] * 0.25 * domain_range
+            seed_pop[:, d] = np.clip(
+                seed_pop[:, d] + shift, self.lb, self.ub,
+            )
+
         seed_pop = self._enforce_basin_distance(seed_pop, lb_new, ub_new)
 
         pre_restart_best = self.best_fitness
         self._best_before_restart = self.best_fitness
         self._nlshade.reinitialize(
             keep_memory=True,
-            lb_override=lb_new,
-            ub_override=ub_new,
             seed_pop=seed_pop,
         )
         self._sync_best()
-        self._gens_without_improvement = 0
+        self._fes_without_improvement = 0
         self._best_at_last_check = self.best_fitness
 
         if self.verbose:

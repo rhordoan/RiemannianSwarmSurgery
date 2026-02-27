@@ -156,21 +156,23 @@ class _CurvatureField:
         aug_pop, aug_fit, n_active = self._augmented(pop, fitness)
         N_aug = len(aug_pop)
 
-        # --- PCA projection to intrinsic manifold ---
-        # Graph topology and ORC computed in d_eff-dimensional space to
-        # eliminate distance concentration at high D. Explore targets stay
-        # in original space for full-dimensional mutation vectors.
-        d_eff = min(self.dim, 10)
-        aug_mean = aug_pop.mean(axis=0)
-        aug_centered = aug_pop - aug_mean
-        try:
-            _, _, Vt = np.linalg.svd(aug_centered, full_matrices=False)
-            proj_pop = aug_centered @ Vt[:d_eff].T
-        except np.linalg.LinAlgError:
-            proj_pop = aug_centered[:, :min(d_eff, aug_centered.shape[1])]
+        # --- Fitness-lifted positions (replaces PCA projection) ---
+        # Append log-fitness as an extra coordinate scaled by sqrt(D).
+        # Euclidean distance in lifted space reflects both spatial proximity
+        # AND fitness similarity: agents in the same basin stay close, agents
+        # separated by a fitness ridge become far apart. This is the pullback
+        # metric on the fitness graph surface (x, f(x)).
+        # Log-fitness compresses the dynamic range (CEC functions span 1e-14
+        # to 1e+10) while preserving relative basin structure.
+        spatial_std = max(aug_pop.std(), 1e-10)
+        log_fit = np.log1p(np.maximum(aug_fit, 0.0))
+        log_fit_std = max(log_fit.std(), 1e-10)
+        gamma = np.sqrt(self.dim)
+        fit_col = (gamma * log_fit / log_fit_std)[:, np.newaxis]
+        lifted = np.hstack([aug_pop / spatial_std, fit_col])
 
-        # --- Adaptive k: scale with intrinsic dimensionality ---
-        k_target = min(2 * d_eff + 1, N_aug // 4, 7)
+        # --- Adaptive k ---
+        k_target = min(2 * min(self.dim, 15) + 1, N_aug // 4, 7)
         k_actual = min(k_target, N_aug - 1)
 
         if k_actual < 2:
@@ -180,9 +182,9 @@ class _CurvatureField:
             self._explore_valid = np.zeros(N_active, dtype=bool)
             return zk, zx
 
-        # --- k-NN graph on projected positions ---
-        tree = KDTree(proj_pop)
-        _, indices = tree.query(proj_pop, k=k_actual + 1)
+        # --- k-NN graph on fitness-lifted positions ---
+        tree = KDTree(lifted)
+        _, indices = tree.query(lifted, k=k_actual + 1)
 
         nbrs_list = [set() for _ in range(N_aug)]
         edge_set = set()
@@ -197,7 +199,7 @@ class _CurvatureField:
         nbrs_list = [list(s) for s in nbrs_list]
         edges = list(edge_set)
 
-        # --- ORC on projected positions ---
+        # --- ORC on fitness-lifted positions ---
         # Truncate nu/nv to k_actual-1 to guarantee equal support-set sizes.
         # Every node has >=k_actual undirected neighbors; after excluding one
         # endpoint, >=k_actual-1 remain. Fixed-size sets make cost matrices
@@ -211,9 +213,9 @@ class _CurvatureField:
             if not nu or not nv:
                 continue
             orc_edge[ei] = compute_orc_edge(
-                proj_pop[u], proj_pop[v],
-                proj_pop[np.array(nu, dtype=int)],
-                proj_pop[np.array(nv, dtype=int)],
+                lifted[u], lifted[v],
+                lifted[np.array(nu, dtype=int)],
+                lifted[np.array(nv, dtype=int)],
             )
 
         # --- Per-agent kappa: minimum incident ORC ---
@@ -236,12 +238,9 @@ class _CurvatureField:
                     if other_nbrs:
                         nbr_arr = np.array(other_nbrs, dtype=int)
                         nbr_fits = aug_fit[nbr_arr]
-                        if nbr_fits.min() < aug_fit[agent_idx]:
-                            shifted = nbr_fits - nbr_fits.min()
-                            sigma = max(shifted.std(), 1e-10)
-                            w = np.exp(-shifted / sigma)
-                            w /= w.sum()
-                            x_explore[agent_idx] = (aug_pop[nbr_arr] * w[:, None]).sum(axis=0)
+                        best_nbr = nbr_arr[np.argmin(nbr_fits)]
+                        if aug_fit[best_nbr] < aug_fit[agent_idx]:
+                            x_explore[agent_idx] = aug_pop[best_nbr].copy()
                             explore_valid[agent_idx] = True
                     else:
                         if aug_fit[other_idx] < aug_fit[agent_idx]:
@@ -410,14 +409,20 @@ class ORCSHADE:
         suc_F_xp,  suc_CR_xp,  suc_d_xp  = [], [], []   # exploration
         total_alpha = 0.0
 
-        kappa_range = max(self.kappa_scale - self.kappa_min, 1e-6)
+        # Adaptive kappa normalization: use 90th percentile of |kappa|
+        # among active agents so the strongest saddle agents get alpha~1.
+        neg_kappas = np.abs(kappa[(kappa < -self.kappa_min)
+                                  & (np.arange(len(kappa)) < len(ev))
+                                  & ev[:len(kappa)]])
+        if len(neg_kappas) >= 3:
+            kappa_range = max(np.percentile(neg_kappas, 90) - self.kappa_min, 0.05)
+        else:
+            kappa_range = max(self.kappa_scale - self.kappa_min, 1e-6)
 
         for i in range(N):
             ki = float(kappa[i])
             explore_active = (i < len(ev) and bool(ev[i]))
 
-            # Fix 1 + Fix 2: alpha > 0 only for non-elite agents whose ORC
-            # signal is above the Wasserstein estimator noise floor kappa_min.
             if ki < -self.kappa_min and explore_active and i not in elite_set:
                 alpha_i = float(np.clip(
                     (abs(ki) - self.kappa_min) / kappa_range, 0.0, 1.0))
@@ -425,7 +430,7 @@ class ORCSHADE:
                 alpha_i = 0.0
             total_alpha += alpha_i
 
-            # Fix 3: draw F/CR from the mode-appropriate SHADE history.
+            # Draw F/CR from the mode-appropriate SHADE history.
             if alpha_i > 0.0:
                 Fi   = self._gen_F_one(self.M_F_explore)
                 CR_i = self._gen_CR_one(self.M_CR_explore)
@@ -441,7 +446,8 @@ class ORCSHADE:
             while r2 == i or r2 == r1:
                 r2 = np.random.randint(0, len(combined))
 
-            # Continuous blend; alpha=0 is identical to current-to-pbest/1.
+            # Continuous blend: alpha=0 is pure current-to-pbest/1 (NL-SHADE).
+            # alpha>0 smoothly steers toward verified best across saddle.
             target = alpha_i * x_explore[i] + (1.0 - alpha_i) * self.pop[pbest_idx]
             mutant = (self.pop[i]
                       + Fi * (target - self.pop[i])
