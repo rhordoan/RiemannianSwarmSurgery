@@ -29,6 +29,17 @@ the L-SHADE in src/lshade.py.
 import numpy as np
 
 
+def _lhs_init(dim, n, lb, ub, seed=None):
+    """Latin Hypercube Sampling initialization for better space coverage."""
+    try:
+        from scipy.stats.qmc import LatinHypercube
+        sampler = LatinHypercube(d=dim, seed=seed)
+        unit = sampler.random(n=n)
+        return lb + (ub - lb) * unit
+    except Exception:
+        return np.random.uniform(lb, ub, (n, dim))
+
+
 class NLSHADE:
     """
     NL-SHADE optimizer: SHADE with non-linear population size reduction.
@@ -64,12 +75,15 @@ class NLSHADE:
         self.H = H
         self.psr_exponent = psr_exponent
 
-        lb, ub = problem.bounds[0], problem.bounds[1]
-        self.lb = lb
-        self.ub = ub
+        lb, ub = float(problem.bounds[0]), float(problem.bounds[1])
+        self.lb = np.full(dim, lb)
+        self.ub = np.full(dim, ub)
+        self._orig_lb = self.lb.copy()
+        self._orig_ub = self.ub.copy()
+        self._orig_pop_size_init = self.pop_size_init
 
-        # --- Initialise population ---
-        self.pop = np.random.uniform(lb, ub, (self.pop_size, dim))
+        # --- Initialise population (LHS for better coverage) ---
+        self.pop = _lhs_init(dim, self.pop_size, self.lb, self.ub)
         self.fitness = np.array([problem.evaluate(x) for x in self.pop])
         self.fe_count = self.pop_size
 
@@ -88,6 +102,8 @@ class NLSHADE:
         self.archive_max_size = self.pop_size_init
 
         self.generation = 0
+        self._segment_start_fe = 0
+        self._segment_max_fe = self.max_fe
 
     # ------------------------------------------------------------------
     # Parameter adaptation helpers
@@ -138,14 +154,16 @@ class NLSHADE:
 
     def _nlpsr_target_size(self) -> int:
         """
-        Non-linear population size at the current FE count.
+        Non-linear population size using segment-local progress.
 
-        N(t) = round(N_max + (N_min - N_max) * (t / max_FE)^(1/p))
+        After a reinitialize(), PSR resets so each restart segment gets
+        a full exploration-to-exploitation cycle.
 
-        With p=4 the exponent 1/p = 0.25, giving a concave schedule:
-        large population for the first ~50% budget, fast collapse at end.
+        N(t) = round(N_max + (N_min - N_max) * (t_seg / budget_seg)^(1/p))
         """
-        progress = self.fe_count / self.max_fe
+        seg_elapsed = self.fe_count - self._segment_start_fe
+        seg_budget = self._segment_max_fe - self._segment_start_fe
+        progress = min(seg_elapsed / max(seg_budget, 1), 1.0)
         exponent = 1.0 / self.psr_exponent
         new_size = round(
             self.pop_size_init
@@ -207,12 +225,11 @@ class NLSHADE:
                       + Fi * (self.pop[pbest_idx] - self.pop[i])
                       + Fi * (self.pop[r1] - combined[r2]))
 
-            # Bounce-back boundary handling
-            for d in range(self.dim):
-                if mutant[d] < self.lb:
-                    mutant[d] = (self.lb + self.pop[i][d]) * 0.5
-                elif mutant[d] > self.ub:
-                    mutant[d] = (self.ub + self.pop[i][d]) * 0.5
+            # Bounce-back boundary handling (per-dimension)
+            below = mutant < self.lb
+            above = mutant > self.ub
+            mutant[below] = (self.lb[below] + self.pop[i][below]) * 0.5
+            mutant[above] = (self.ub[above] + self.pop[i][above]) * 0.5
 
             # Binomial crossover
             j_rand = np.random.randint(0, self.dim)
@@ -272,6 +289,71 @@ class NLSHADE:
             self.fitness = self.fitness[keep]
 
         return self.best_fitness
+
+    # ------------------------------------------------------------------
+    # Restart support (used by CARS)
+    # ------------------------------------------------------------------
+
+    def reinitialize(self, keep_memory=True, new_pop_size=None,
+                     lb_override=None, ub_override=None,
+                     seed_pop=None):
+        """
+        Reinitialize the population for a new search segment.
+
+        Per-dimension bounds can be overridden to restrict the search
+        to a sub-region (used by CARS dimensional exclusion).  Bounds
+        persist for the entire segment so that NL-SHADE's boundary
+        handling keeps the population in the target region.
+
+        Args:
+            keep_memory:  if True, preserve SHADE memory across restart.
+            new_pop_size: override population size (for IPOP scaling).
+            lb_override:  ndarray (D,), per-dim lower bounds for this segment.
+            ub_override:  ndarray (D,), per-dim upper bounds for this segment.
+            seed_pop:     ndarray (ps, D), pre-generated population to use
+                          instead of LHS sampling.
+        """
+        ps = new_pop_size or self._orig_pop_size_init
+
+        if lb_override is not None:
+            self.lb = np.asarray(lb_override, dtype=float)
+        else:
+            self.lb = self._orig_lb.copy()
+
+        if ub_override is not None:
+            self.ub = np.asarray(ub_override, dtype=float)
+        else:
+            self.ub = self._orig_ub.copy()
+
+        if seed_pop is not None:
+            new_pop = np.asarray(seed_pop, dtype=float)
+            ps = len(new_pop)
+        else:
+            new_pop = _lhs_init(self.dim, ps, self.lb, self.ub)
+
+        self.pop = new_pop
+        self.fitness = np.array(
+            [self.problem.evaluate(x) for x in self.pop]
+        )
+        self.fe_count += len(self.pop)
+        self.pop_size = ps
+        self.pop_size_init = ps
+
+        best_idx = np.argmin(self.fitness)
+        if self.fitness[best_idx] < self.best_fitness:
+            self.best_fitness = float(self.fitness[best_idx])
+            self.best_solution = self.pop[best_idx].copy()
+
+        self.archive.clear()
+        self.archive_max_size = ps
+        self.generation = 0
+        self._segment_start_fe = self.fe_count
+        self._segment_max_fe = self.max_fe
+
+        if not keep_memory:
+            self.M_F = np.full(self.H, 0.5)
+            self.M_CR = np.full(self.H, 0.5)
+            self.k = 0
 
     # ------------------------------------------------------------------
     # Full-run interface
