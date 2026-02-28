@@ -75,25 +75,25 @@ VARIANTS: dict = {
         "cls": "NLSHADE",
         "kwargs": {},
     },
-    # ORC-SHADE v2: full algorithm (kappa_min=0.15, p_elite=0.2 are defaults)
+    # ORC-SHADE v2 (tuned): kappa_min=0.0, p_elite=0.05, k_max=10
     "ORC-SHADE": {
         "cls": "ORCSHADE",
         "kwargs": {},
     },
-    # Ablation A: no kappa threshold (fires on all negative curvature incl. noise)
-    "ORC-SHADE[km=0]": {
-        "cls": "ORCSHADE",
-        "kwargs": {"kappa_min": 0.0},
-    },
-    # Ablation B: no elite protection (all agents can explore)
-    "ORC-SHADE[pe=0]": {
-        "cls": "ORCSHADE",
-        "kwargs": {"p_elite": 0.0},
-    },
-    # Ablation C: ORC disabled (kappa_scale huge => alpha=0 always => NL-SHADE clone)
+    # Ablation A: ORC disabled (kappa_min=2.0 => alpha=0 always => NL-SHADE clone)
     "ORC-SHADE[no-orc]": {
         "cls": "ORCSHADE",
-        "kwargs": {"kappa_scale": 999.0},
+        "kwargs": {"kappa_min": 2.0},
+    },
+    # Ablation B: old threshold (kappa_min=0.15 dead-zone filters weak saddles)
+    "ORC-SHADE[km=.15]": {
+        "cls": "ORCSHADE",
+        "kwargs": {"kappa_min": 0.15},
+    },
+    # Ablation C: old elite protection (p_elite=0.2 shields top 20%)
+    "ORC-SHADE[pe=.2]": {
+        "cls": "ORCSHADE",
+        "kwargs": {"p_elite": 0.2},
     },
 }
 

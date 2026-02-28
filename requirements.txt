@@ -4,3 +4,5 @@ networkx>=3.4
 matplotlib>=3.8
 opfunu>=1.0.1
 cma>=3.3
+scikit-learn>=1.4
+ioh>=0.3.14

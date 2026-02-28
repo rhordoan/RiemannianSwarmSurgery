@@ -1,0 +1,10 @@
+{
+  "pct_orc": 44.0,
+  "pct_rand": 44.70399999999999,
+  "pct_worst": 45.92,
+  "advantage": 0.9842519685039371,
+  "hc_pct": 2.0,
+  "n_optima": 625,
+  "n_hc_trials": 50,
+  "n_random_trials": 30
+}

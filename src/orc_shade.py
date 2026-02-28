@@ -64,10 +64,11 @@ class _CurvatureField:
     fitness-gated softmin-centroid explore target for agents on saddles.
     """
 
-    def __init__(self, dim, update_period=5, ghost_size=None):
+    def __init__(self, dim, update_period=5, ghost_size=None, k_max=10):
         self.dim = dim
         self.update_period = update_period
         self.ghost_size = ghost_size if ghost_size is not None else 18 * dim
+        self.k_max = k_max
         self._ghost_pos = []
         self._ghost_fit = []
         self._kappa = np.array([])
@@ -172,7 +173,7 @@ class _CurvatureField:
         lifted = np.hstack([aug_pop / spatial_std, fit_col])
 
         # --- Adaptive k ---
-        k_target = min(2 * min(self.dim, 15) + 1, N_aug // 4, 7)
+        k_target = min(2 * min(self.dim, 15) + 1, N_aug // 4, self.k_max)
         k_actual = min(k_target, N_aug - 1)
 
         if k_actual < 2:
@@ -219,8 +220,12 @@ class _CurvatureField:
             )
 
         # --- Per-agent kappa: minimum incident ORC ---
+        # The explore target is coupled to the most-negative edge: only
+        # the strongest saddle signal determines where to explore.  This
+        # prevents weak/noisy negative edges from triggering exploration
+        # toward marginally-better but spatially-distant solutions.
         kappa = np.zeros(N_active)
-        x_explore = np.array([pop[i].copy() for i in range(N_active)])
+        x_explore = pop.copy()
         explore_valid = np.zeros(N_active, dtype=bool)
 
         for ei, (u, v) in enumerate(edges):
@@ -229,11 +234,6 @@ class _CurvatureField:
                     continue
                 if orc_edge[ei] < kappa[agent_idx]:
                     kappa[agent_idx] = orc_edge[ei]
-                    # Fitness-gated softmin-centroid explore target.
-                    # Only cross the saddle when the other community is
-                    # genuinely better. Prevents:
-                    # (a) ridge agents exploring toward worse off-ridge regions
-                    # (b) unimodal agents chasing phantom community structure
                     other_nbrs = nbrs_list[other_idx]
                     if other_nbrs:
                         nbr_arr = np.array(other_nbrs, dtype=int)
@@ -251,7 +251,7 @@ class _CurvatureField:
         self._x_explore = x_explore
         self._explore_valid = explore_valid
         self.mean_kappa = float(kappa.mean()) if N_active else 0.0
-        self.n_clusters = int(explore_valid.sum())  # diagnostic: agents with valid explore
+        self.n_clusters = int(explore_valid.sum())
         return kappa, x_explore
 
 
@@ -288,7 +288,7 @@ class ORCSHADE:
     def __init__(self, problem, dim, pop_size=None, max_fe=200_000,
                  pop_size_min=4, H=6, orc_update_period=5, ghost_size=None,
                  pop_schedule="nonlinear", kappa_scale=1.0,
-                 kappa_min=0.15, p_elite=0.2):
+                 kappa_min=0.0, p_elite=0.05, k_max=10):
         self.problem = problem
         self.dim = dim
         self.pop_size_init = pop_size if pop_size is not None else 18 * dim
@@ -337,6 +337,7 @@ class ORCSHADE:
 
         self._curv = _CurvatureField(
             dim=dim, update_period=orc_update_period, ghost_size=ghost_size,
+            k_max=k_max,
         )
         self._base_update_period = orc_update_period
         self._idle_streak = 0
@@ -456,9 +457,9 @@ class ORCSHADE:
             mutant = self._bounce(mutant.copy(), self.pop[i])
             j_rand = np.random.randint(0, self.dim)
             trial = self.pop[i].copy()
-            for d in range(self.dim):
-                if np.random.rand() < CR_i or d == j_rand:
-                    trial[d] = mutant[d]
+            mask = np.random.rand(self.dim) < CR_i
+            mask[j_rand] = True
+            trial[mask] = mutant[mask]
 
             f_trial = float(self.problem.evaluate(trial))
             self.fe_count += 1
