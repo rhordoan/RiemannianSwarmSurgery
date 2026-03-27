@@ -248,6 +248,11 @@ def full_landscape_analysis(
                 random_better_count += 1
         frac_random_better = random_better_count / n_random_trials
 
+        # MinGap baseline: follow the neighbor with smallest fitness difference
+        min_gap_nbr = min(nbrs, key=lambda n: abs(fitness[n] - fitness[opt]))
+        min_gap_dest = hill_climb(min_gap_nbr, fitness, neighbor_fn)
+        min_gap_leads_to_better = fitness[min_gap_dest] < fitness[opt]
+
         orc_analyses.append({
             'opt_idx': opt,
             'opt_fitness': float(fitness[opt]),
@@ -258,6 +263,9 @@ def full_landscape_analysis(
             'has_negative_orc': min_orc < 0,
             'leads_to_better': leads_to_better,
             'worst_orc_leads_to_better': worst_orc_leads_to_better,
+            'min_gap_leads_to_better': min_gap_leads_to_better,
+            'min_gap_neighbor': int(min_gap_nbr),
+            'min_gap_dest': int(min_gap_dest) if min_gap_dest is not None else None,
             'frac_random_better': frac_random_better,
             'dest_opt': dest_opt,
             'basin_size': basins.get(opt, 0),
@@ -268,6 +276,7 @@ def full_landscape_analysis(
     n_neg = sum(1 for a in orc_analyses if a['has_negative_orc'])
     n_better = sum(1 for a in orc_analyses if a['leads_to_better'])
     n_worst_better = sum(1 for a in orc_analyses if a['worst_orc_leads_to_better'])
+    n_mingap_better = sum(1 for a in orc_analyses if a['min_gap_leads_to_better'])
 
     optima_with_neg = [a for a in orc_analyses if a['has_negative_orc']]
     mean_random_better = (
@@ -285,6 +294,7 @@ def full_landscape_analysis(
         'n_leads_to_better': n_better,
         'frac_random_leads_to_better': mean_random_better,
         'frac_worst_orc_leads_to_better': n_worst_better / n_neg if n_neg else 0.0,
+        'frac_mingap_leads_to_better': n_mingap_better / n_opt if n_opt else 0.0,
         'local_optima': local_optima,
         'basin_sizes': basins,
         'orc_analyses': orc_analyses,

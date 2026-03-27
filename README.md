@@ -1,65 +1,130 @@
-# Geometric Deep Optimization: Riemannian Swarm Surgery (RSS)
+# ORC Transition Graph: Ollivier–Ricci Curvature for Discrete Fitness Landscape Analysis
 
-## 1. The Paradigm Shift: From Traversal to Surgery
-Prevailing optimization paradigms (gradient descent, CMA-ES) treat the objective function as a **static, immutable landscape**. The optimizer acts as an explorer navigating a fixed Riemannian manifold $(M, g)$. In high dimensions ($D > 100$) and complex "Russian Doll" topologies (like IEEE CEC 2022 Composition Functions), this assumption fails. The topology itself—characterized by hyperbolic necks and non-contractible loops—conspires against the agent.
+Companion code and data for the paper:
 
-**Riemannian Swarm Surgery (RSS)** proposes a foundational shift to **Geometric Deep Optimization (GDO)**. Instead of merely searching the manifold, we dynamically **evolve the manifold's metric tensor** $g_{ij}$ to simplify the problem structure itself.
+> **Ollivier–Ricci Curvature as a Landscape Analysis Framework for Discrete Combinatorial Optimization**
+> Roberto Sergiu Hordoan — Babeș–Bolyai University, Cluj-Napoca, Romania
+> *Submitted to PPSN 2026 (Springer LNCS)*
 
-> "The algorithm does not simply climb the hill; it deforms the hill until it becomes a plateau or a single peak."
+## Overview
 
-## 2. Core Mechanisms
+This repository implements the **ORC Transition Graph (OTG)**, a deterministic directed graph over local optima derived from Ollivier–Ricci curvature (ORC). The OTG extracts cross-basin structural information from fitness landscapes using only 1-hop neighborhood data, achieving up to 9.2× better attractor quality than LON-d1 on epistatic W-model landscapes.
 
-RSS integrates three advanced mathematical frameworks to perform this surgery:
+The framework covers three foundational neighborhoods in combinatorial optimization:
+- **Binary hypercubes** (bit-flip) — NK landscapes, W-model, MAX-SAT
+- **Permutation swap graphs** — QAP
+- **TSP 2-opt neighborhoods** — TSP
 
-### 2.1 Discrete Forman-Ricci Flow (The Engine)
-We utilize a combinatorial discretization of Ricci curvature (Forman-Ricci Curvature) on the swarm's $k$-Nearest Neighbor graph.
-*   **Positive Curvature (Basins)**: The flow contracts these regions, creating an attractive "gravity well" that accelerates convergence.
-*   **Negative Curvature (Bottlenecks/Saddles)**: The flow expands these regions, pushing agents apart and widening narrow passages.
-This allows the algorithm to actively reshape the optimization landscape in $O(1)$ time per edge.
+## Repository Structure
 
-### 2.2 Topological Scouting via Persistent Homology (The Scout)
-While Ricci flow acts locally, we need a global "Topological Eye". We use **Persistent Homology** (via Vietoris-Rips filtration) to compute Betti numbers:
-*   **$\beta_0$ (Connected Components)**: Detects distinct basins of attraction.
-*   **$\beta_1$ (Cycles/Loops)**: Detects when agents are trapped circumnavigating a central peak or spiral ridge (common in Composition Functions).
-This allows the system to detect global topological obstructions that local gradients cannot see.
+```
+├── src/                        # Core library
+│   ├── orc_discrete.py         # Generic discrete ORC computation
+│   ├── orc_tsp.py              # ORC for TSP 2-opt neighborhoods
+│   ├── nk_landscape.py         # NK landscape generator
+│   ├── wmodel.py               # W-model benchmark generator
+│   ├── landscape_metrics.py    # Classical FLA metrics (FDC, autocorrelation, ELA)
+│   └── ollivier_ricci.py       # Base Ollivier-Ricci implementation
+│
+├── benchmarks/                 # Experiment scripts (paper results)
+│   ├── landscape_analysis_discrete.py   # Main escape rate & correlation analysis
+│   ├── otg_analysis.py                  # OTG vs LON funnel detection
+│   ├── orc_ils.py                       # ILS comparison experiments
+│   ├── maxsat_otg.py                    # MAX-SAT scaling experiments
+│   ├── qap_otg.py                       # QAP experiments
+│   ├── tsp_2opt_experiment.py           # TSP 2-opt experiments
+│   ├── tsp_2opt_scaling.py              # TSP scaling analysis
+│   └── ela_features.py                  # ELA feature comparison
+│
+├── results/                    # Experimental results (JSON/CSV)
+│   ├── landscape_discrete_v3.json       # NK/W-model escape rates (N=16)
+│   ├── landscape_discrete_n20.json      # NK escape rates (N=20)
+│   ├── otg_analysis_v4.json             # OTG vs LON funnel quality
+│   ├── orc_ils_v3.json                  # ILS comparison results
+│   ├── maxsat_otg_scaling.json          # MAX-SAT results (N=20,50,100)
+│   ├── qap_otg.json                     # QAP results
+│   ├── tsp_2opt_results.json            # TSP enumeration results
+│   └── tsp_2opt_scaling.json            # TSP scaling results
+│
+├── paper/                      # LaTeX source (Springer LNCS)
+│   ├── main.tex                # Paper source
+│   ├── llncs.cls               # LNCS document class
+│   └── figures/                # Generated figures
+│
+├── tests/                      # Unit tests
+├── requirements.txt            # Python dependencies
+└── README.md                   # This file
+```
 
-### 2.3 Topological Surgery (The "Cut and Cap")
-When a topological obstruction is confirmed (e.g., a persistent $\beta_1$ loop or a "dumbell" shape), the algorithm performs surgery:
-1.  **Cut**: Edges with highly negative curvature are severed, topologically splitting the swarm into independent sub-species.
-2.  **Cap**: The local metric is re-stabilized, allowing sub-swarms to optimize independently without bad gradient interference.
+## Installation
 
-### 2.4 Sheaf-Theoretic Memory (The Archive)
-To prevent the swarm from cycling back into previously pruned regions, we model the search history as a **Cellular Sheaf**. "Ghost Topologies" of failed or explored regions are stored, and new agents act as sections that are repelled from these regions via metric inflation if they show local consistency with the ghosts.
-
-## 3. Goals
-The primary objective of this framework is to solve the "**Russian Doll**" traps found in the **IEEE CEC 2022 Composition Functions (F11 & F12)**, where standard state-of-the-art algorithms (like L-SHADE variants and CMA-ES) stagnate due to inability to handle conflicting curvature signals between nested basins.
-
-## 4. Usage
-
-### Installation
 ```bash
 pip install -r requirements.txt
-# Optional: Install fast C++ curvature library
-# pip install GraphRicciCurvature
 ```
 
-### Running the Optimizer
-```python
-from benchmarks.rss_optimizer import RSSOptimizer
-from benchmarks.synthetic_functions import RussianDollFunction
+**Requirements:** Python ≥ 3.10, NumPy, SciPy, NetworkX, Matplotlib, scikit-learn, IOHexperimenter.
 
-problem = RussianDollFunction(dimension=10)
-opt = RSSOptimizer(problem, pop_size=30, dim=10, max_fe=20000, archive_type='sheaf')
-history = opt.run()
-```
+## Reproducing Paper Results
 
-### Reproducing Benchmark
+Each experiment script in `benchmarks/` is self-contained and writes results to `results/`.
+
+### Table 1 & 6: Escape rates and correlation analysis (N=16)
 ```bash
-python benchmarks/run_benchmark.py
+python benchmarks/landscape_analysis_discrete.py
 ```
-Results will be saved to `results/convergence_d10.png`.
 
-## 5. Preliminary Results (Synthetic Russian Doll)
-RSS-Sheaf demonstrates robust convergence behavior compared to baseline methods. The topological surgery mechanism correctly identifies and severs connections when the swarm becomes entangled in the "Russian Doll" nested basins, preventing the cyclic stagnation observed in standard CMA-ES.
+### Table 2: OTG vs LON funnel quality
+```bash
+python benchmarks/otg_analysis.py
+```
 
-## 6. Architecture
+### Table 3: MAX-SAT scaling (N=20, 50, 100)
+```bash
+python benchmarks/maxsat_otg.py
+```
+
+### Table 4: QAP experiments
+```bash
+python benchmarks/qap_otg.py
+```
+
+### Table 5: TSP 2-opt experiments
+```bash
+python benchmarks/tsp_2opt_experiment.py    # Full enumeration (n=8,9,10)
+python benchmarks/tsp_2opt_scaling.py       # Scaling (n=15,20,30,50)
+```
+
+### Table 6 (ILS comparison)
+```bash
+python benchmarks/orc_ils.py
+```
+
+### Table 7: N=20 escape rates
+```bash
+python benchmarks/landscape_analysis_discrete.py  # Includes N=20 configurations
+```
+
+### Figures
+```bash
+python paper/generate_new_figures.py
+```
+
+## Citation
+
+If you use this code, please cite:
+
+```bibtex
+@inproceedings{hordoan2026orc,
+  title     = {Ollivier--Ricci Curvature as a Landscape Analysis Framework
+               for Discrete Combinatorial Optimization},
+  author    = {Hordoan, Roberto Sergiu},
+  booktitle = {Parallel Problem Solving from Nature (PPSN 2026)},
+  series    = {LNCS},
+  publisher = {Springer},
+  year      = {2026}
+}
+```
+
+## License
+
+This project is provided for academic reproducibility.

@@ -206,3 +206,70 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 .claude/
+
+# ============================================
+# Project-specific ignores
+# ============================================
+
+# LaTeX build artifacts
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.synctex.gz
+paper/*.synctex(busy)
+trsi_summary.aux
+trsi_summary.log
+trsi_summary.out
+trsi_report/*.aux
+trsi_report/*.log
+trsi_report/*.bbl
+trsi_report/*.blg
+
+# Administrative / university documents
+*.docx
+TRSI_Descriere*.pdf
+Template*.zip
+anexa*.docx
+
+# Duplicate / timestamped PDFs
+paper/main (*)*.pdf
+
+# Generated figure directories
+results/otg_figures/
+results/otg_figures_v2/
+results/otg_funnel_figures/
+
+# Old paper artifacts (not used in current submission)
+paper/fig1.eps
+paper/llncs2e.zip
+paper/llncsdoc.pdf
+paper/samplepaper.tex
+paper/history.txt
+paper/readme.txt
+paper/generate_figures.py
+paper/figures/fig_correlation_heatmap.pdf
+paper/figures/fig_orc_advantage.pdf
+paper/figures/fig_scatter_orc_hc.pdf
+paper/figures/fig_trends.pdf
+
+# Old runner scripts
+run_benchmark.ps1
+run_benchmark.sh
+run_overnight_benchmark.sh
+run_tmi_full.sh
+run_tmi_quick.sh
+run_v2_D10.sh
+
+# Legacy _original files
+*_original.py
+
+# Large result files (host on Zenodo/releases instead)
+results/landscape_discrete_v3.json
+
+# TRSI report (separate document)
+trsi_report/
+trsi_summary.*

@@ -135,6 +135,7 @@ def _analyze_instance(args: dict) -> dict:
         'n_leads_to_better': orc_result['n_leads_to_better'],
         'frac_random_leads_to_better': orc_result['frac_random_leads_to_better'],
         'frac_worst_orc_leads_to_better': orc_result['frac_worst_orc_leads_to_better'],
+        'frac_mingap_leads_to_better': orc_result['frac_mingap_leads_to_better'],
         'mean_min_orc': float(np.mean(all_min_orcs)) if all_min_orcs else 0.0,
         'std_min_orc': float(np.std(all_min_orcs)) if all_min_orcs else 0.0,
         'mean_orc': float(np.mean(all_orc_values)) if all_orc_values else 0.0,
@@ -148,6 +149,21 @@ def _analyze_instance(args: dict) -> dict:
         'partial_information_content_M': classical['partial_information_content_M'],
         # Algorithm performance
         **algo_results,
+        # Per-optimum data for OTG analysis
+        'orc_analyses': [
+            {
+                'opt_idx': a['opt_idx'],
+                'opt_fitness': a['opt_fitness'],
+                'min_orc': a['min_orc'],
+                'min_orc_neighbor': a['min_orc_neighbor'],
+                'leads_to_better': a['leads_to_better'],
+                'dest_opt': a['dest_opt'],
+                'min_gap_leads_to_better': a['min_gap_leads_to_better'],
+                'min_gap_dest': a.get('min_gap_dest'),
+                'basin_size': a['basin_size'],
+            }
+            for a in orc_result['orc_analyses']
+        ],
         # Timing
         'orc_time_s': round(orc_time, 3),
         'classical_time_s': round(classical_time, 3),
@@ -354,10 +370,10 @@ def _print_summary(results):
     for r in results:
         groups[r['label']].append(r)
 
-    print(f"\n{'='*120}")
-    print(f"{'Config':<35} {'#Opt':>6} {'%NegORC':>8} {'%ORC':>7} {'%Rand':>7} {'%Worst':>7} "
-          f"{'FDC':>7} {'ACL':>5} {'HC_sr':>7} {'EA_sr':>7}")
-    print(f"{'='*120}")
+    print(f"\n{'='*140}")
+    print(f"{'Config':<35} {'#Opt':>6} {'%NegORC':>8} {'%ORC':>7} {'%Rand':>7} {'%MinGap':>8} {'%Worst':>7} "
+          f"{'Adv':>5} {'FDC':>7} {'ACL':>5} {'HC_sr':>7} {'EA_sr':>7}")
+    print(f"{'='*140}")
 
     for label in sorted(groups.keys()):
         rows = groups[label]
@@ -366,13 +382,15 @@ def _print_summary(results):
         better = np.mean([r['frac_leads_to_better'] for r in rows])
         rand_better = np.mean([r.get('frac_random_leads_to_better', 0) for r in rows])
         worst_better = np.mean([r.get('frac_worst_orc_leads_to_better', 0) for r in rows])
+        mingap_better = np.mean([r.get('frac_mingap_leads_to_better', 0) for r in rows])
+        adv = better / rand_better if rand_better > 0.001 else float('inf')
         fdc = np.mean([r['fdc'] for r in rows])
         acl = np.mean([r['autocorrelation_length'] for r in rows])
         hc_sr = np.mean([r['algo_HC_success_rate'] for r in rows])
         ea_sr = np.mean([r['algo_EA_success_rate'] for r in rows])
         print(f"{label:<35} {n_opt:>6.0f} {100*neg:>7.1f}% {100*better:>6.1f}% "
-              f"{100*rand_better:>6.1f}% {100*worst_better:>6.1f}% "
-              f"{fdc:>7.3f} {acl:>5.1f} {100*hc_sr:>6.1f}% {100*ea_sr:>6.1f}%")
+              f"{100*rand_better:>6.1f}% {100*mingap_better:>7.1f}% {100*worst_better:>6.1f}% "
+              f"{adv:>4.1f}x {fdc:>7.3f} {acl:>5.1f} {100*hc_sr:>6.1f}% {100*ea_sr:>6.1f}%")
 
 
 if __name__ == '__main__':

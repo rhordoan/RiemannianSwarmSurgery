@@ -8,33 +8,33 @@
 \usepackage{xcolor}
 \usepackage{algorithm}
 \usepackage{algorithmic}
+\usepackage{placeins}
 \usepackage{hyperref}
 
 \begin{document}
 
-\title{Ollivier--Ricci Curvature as a Landscape Metric\\for Discrete Combinatorial Optimization}
-\titlerunning{ORC as a Landscape Metric for Discrete Optimization}
+\title{Ollivier--Ricci Curvature as a Landscape Analysis\\Framework for Discrete Combinatorial Optimization}
+\titlerunning{ORC as a Landscape Analysis Framework}
 
-\author{Hordoan Roberto Sergiu}
-\authorrunning{Hordoan Roberto Sergiu}
-\institute{University Babes-Bolyai, Cluj-Napoca, Romania}
+\author{Roberto Sergiu Hordoan\orcidID{0000-0000-0000-0000}}
+\authorrunning{R.S. Hordoan}
+\institute{Babe\c{s}--Bolyai University, Cluj-Napoca, Romania\\
+\email{roberto.hordoan@stud.ubbcluj.ro}}
 
 \maketitle
 
 \begin{abstract}
-Understanding the structure of fitness landscapes is central to explaining and predicting the performance of metaheuristic optimizers.
-Existing landscape metrics---such as fitness-distance correlation~(FDC) and autocorrelation length---capture global statistical properties but are blind to \emph{local geometric structure} at local optima.
-We introduce \emph{Ollivier--Ricci curvature}~(ORC), a discrete analogue of Ricci curvature from Riemannian geometry, as a new landscape metric for combinatorial optimization.
-ORC measures how the neighborhoods of two adjacent solutions diverge or converge, providing a principled way to detect \emph{inter-basin saddle directions} at local optima.
-We prove that on the $N$-dimensional binary hypercube ($N \ge 4$) with a neighborhood-aware transport cost, every local optimum whose smallest fitness gap satisfies an explicit bound possesses at least one negative-ORC edge---a condition met at 100\% of tested local optima.
-Through experiments on NK~landscapes ($N \in \{16,20\}$, 260~instances), W-model benchmarks (6~epistasis levels, 180~instances), and NAS-Bench-201 (15{,}625~architectures), we show that:
-(1)~following the most negative ORC direction leads to a better local optimum \textbf{2.0$\times$ more often} than following a random direction (e.g., 59.6\% vs.\ 31.6\% on NK $K\!=\!4$);
-(2)~ORC-based features correlate more strongly with hill-climbing difficulty ($\rho = {-}0.670$) than FDC ($\rho = 0.276$) or autocorrelation length ($\rho = 0.543$); and
-(3)~these results hold at both $N\!=\!16$ and $N\!=\!20$ scales.
-Our results establish ORC as a complementary landscape metric that reveals basin connectivity structure invisible to existing approaches, including local optima networks.
+We introduce the \emph{ORC Transition Graph}~(OTG), a deterministic directed graph over local optima derived from Ollivier--Ricci curvature~(ORC), as a structural analysis tool for discrete fitness landscapes.
+Each local optimum has exactly one outgoing edge to the optimum reached by following its most-negative-curvature direction and hill-climbing---a purely local, $O(k^2)$ computation.
+We study OTG on NK landscapes, epistatic W-model benchmarks ($N\!=\!16$, full enumeration), random MAX-SAT ($N$ up to 100), QAP (permutation swaps, $n$ up to 9), and TSP (2-opt, $n$ up to 50 via sampling).
+The OTG extracts cross-basin information invisible to standard local optima networks~(LONs): using only 1-hop neighborhood data, it achieves up to $9.2\times$ better attractor quality than LON-d1 at equal information cost on epistatic W-model landscapes, and even outperforms the stochastic 3-hop LON-d3 on those instances.
+A structural crossover in OTG topology---from acyclic to cyclic at moderate epistasis---correlates with when ORC-guided perturbation outperforms random perturbation in iterated local search~(ILS).
+The OTG framework applies to any graph with the disjoint-neighborhood property (Proposition~1), which we prove covers binary hypercubes, permutation swap graphs, \emph{and} TSP 2-opt neighborhoods---the three foundational neighborhoods in combinatorial optimization.
+ORC's per-step escape advantage grows monotonically with neighborhood size---from $3.1\times$ to $18.3\times$ over random on TSP ($n\!=\!8$ to $50$)---though its computational cost ($O(k^2)$ per optimum) limits algorithmic use to settings where fitness evaluations are expensive.
+Per-optimum ORC metrics converge from ${\sim}20$ sampled optima ($<$1\% error), while full OTG structural analysis remains limited to enumerable landscapes.
 \end{abstract}
 
-\keywords{Fitness landscape analysis \and Ollivier--Ricci curvature \and Discrete optimization \and NK~landscapes \and Basin structure}
+\keywords{Fitness landscape analysis \and Ollivier--Ricci curvature \and Local optima networks \and Discrete optimization \and Permutation spaces}
 
 
 % ===================================================================
@@ -42,187 +42,144 @@ Our results establish ORC as a complementary landscape metric that reveals basin
 \label{sec:intro}
 % ===================================================================
 
-Fitness landscape analysis (FLA) is fundamental to understanding why certain optimization problems are hard for specific algorithms and how to select appropriate solvers~\cite{pitzer2012comprehensive}.
-A rich toolkit of landscape metrics has been developed, including fitness-distance correlation (FDC)~\cite{jones1995fitness}, autocorrelation functions~\cite{stadler1996landscapes}, information content~\cite{vassilev2000information}, and exploratory landscape analysis (ELA) features~\cite{mersmann2011exploratory}.
-These metrics characterize \emph{global} properties of the landscape---its ruggedness, smoothness, and correlation structure---and have proven valuable for algorithm selection and configuration~\cite{kerschke2019automated}.
+Fitness landscape analysis~(FLA) provides the theoretical foundation for understanding why metaheuristic optimizers succeed or fail on specific problem instances~\cite{pitzer2012comprehensive} and for automated algorithm selection~\cite{kerschke2019automated}.
+Classical metrics---fitness-distance correlation~(FDC)~\cite{jones1995fitness}, autocorrelation length~\cite{stadler1996landscapes}, information content~\cite{vassilev2000information}, and exploratory landscape analysis~(ELA) features~\cite{mersmann2011exploratory}---characterize global statistical properties such as ruggedness and smoothness.
+Local optima networks~(LONs)~\cite{ochoa2008first,ochoa2017understanding} go further by representing basin connectivity as a graph whose edges are discovered through stochastic perturbation followed by hill climbing~(HC).
 
-However, existing metrics share a fundamental limitation: they capture statistical summaries of the landscape but are blind to \emph{local geometric structure} at and around local optima.
-Consider two landscapes with identical FDC and autocorrelation profiles but different basin connectivity: in one, local optima are isolated; in the other, specific directions at local optima lead through ``saddle regions'' to better basins.
-No existing metric distinguishes these cases, yet the distinction is precisely what determines whether local-search-based algorithms can escape suboptimal basins.
+Both approaches share a limitation: classical metrics provide scalar summaries blind to local geometric structure, while LONs provide connectivity but not \emph{directional} information---at a local optimum, which specific neighbor escapes the basin?
+LON construction also depends on perturbation distance $d$ and requires many stochastic trials per optimum.
 
-Local optima networks (LONs)~\cite{ochoa2008first,ochoa2017understanding} represent basin connectivity as a graph whose nodes are local optima and whose edges encode perturbation-based transitions.
-While LONs capture the \emph{existence} of inter-basin transitions, they do not provide \emph{directional} information: at a given local optimum, which specific neighbor should be followed to escape the current basin?
-Furthermore, LON edges are defined by stochastic perturbation followed by hill climbing, making the construction expensive and sensitive to the choice of perturbation strength.
+We address these limitations through Ollivier--Ricci curvature~(ORC)~\cite{ollivier2009ricci}, a discrete analogue of Ricci curvature that measures how neighborhood distributions of adjacent nodes diverge or converge.
+Negative curvature identifies directions where the landscape geometry ``spreads apart''---the signature of inter-basin saddle regions.
+From ORC, we construct the \emph{ORC Transition Graph}~(OTG): a deterministic directed graph where each local optimum points to the optimum reached by following its min-ORC direction.
 
-We address these gaps by introducing \emph{Ollivier--Ricci curvature}~(ORC)~\cite{ollivier2009ricci} as a new landscape metric for discrete optimization.
-ORC is a discrete analogue of Ricci curvature from Riemannian geometry that measures how the neighborhood distributions of two adjacent nodes diverge or converge.
-Negative ORC along an edge indicates that the neighborhoods are ``spreading apart''---precisely the geometric signature of a saddle region between basins of attraction.
-Crucially, ORC is computed \emph{locally} at a single node and provides a \emph{signed scalar per direction}, enabling principled ranking of escape directions.
-
-\textbf{Contributions.} We make four contributions:
+\textbf{Contributions.}
 \begin{enumerate}
-\item We formalize ORC on discrete search graphs with a neighborhood-aware transport cost (Section~\ref{sec:method}).
-\item We prove an explicit sufficient condition for negative ORC at local optima on Hamming graphs: $\Delta < (N\!-\!3)/((N\!+\!1)\gamma)$ (Theorem~\ref{thm:negative}, Section~\ref{sec:theory}), verified at 100\% of tested optima.
-\item We demonstrate through extensive experiments on three benchmark families (530+ instances) that the most-negative-ORC direction leads to a better local optimum \textbf{significantly more often} than a random direction---up to 2.7$\times$ more frequently (Section~\ref{sec:results}).
-\item We show that ORC-based features correlate more strongly with algorithm difficulty than classical metrics including FDC, autocorrelation length, and information content (Section~\ref{sec:results}).
+\item We formalize fitness-lifted ORC for discrete optimization landscapes and prove that negative curvature is guaranteed at every local optimum on graphs with the disjoint-neighborhood property, covering binary hypercubes, permutation swap graphs, and TSP 2-opt neighborhoods.
+\item We introduce the OTG, a deterministic, parameter-free directed graph over local optima derived from optimal-transport-based curvature.
+On epistatic binary landscapes, the OTG achieves up to $9.2\times$ better attractor quality than LON-d1 at equal information cost; across binary, permutation, and tour search spaces, ORC's per-step escape advantage grows monotonically with neighborhood size.
+\item We validate the framework algorithmically through ORC-guided iterated local search~(ILS) and show that OTG structural properties---specifically the presence or absence of cycles---indicate when ORC-guided perturbation adds value over random perturbation.
 \end{enumerate}
 
 
 % ===================================================================
-\section{Background and Related Work}
+\section{Background}
 \label{sec:background}
 % ===================================================================
 
-\subsection{Fitness Landscapes and Search Graphs}
+A \emph{fitness landscape} $(S, \mathcal{N}, f)$ consists of solutions $S$, neighborhood function $\mathcal{N}\!: S \to 2^S$, and fitness $f\!: S \to \mathbb{R}$~\cite{stadler1996landscapes}.
+A solution $x^*$ is a \emph{local optimum} (minimization) if $f(x^*) \le f(y)$ for all $y \in \mathcal{N}(x^*)$.
+LONs~\cite{ochoa2008first,ochoa2014local} compress the landscape into a graph whose nodes are local optima and whose edges encode transitions discovered by perturbing a solution (flipping $d$ random bits) and hill-climbing.
+LON features---including funnel structure~\cite{ochoa2017funnels}, fractal dimension~\cite{thomson2022fractal}, and phase-transition indicators~\cite{ochoa2020maxsat}---predict search difficulty~\cite{ochoa2017understanding}, but edge construction requires $T$ stochastic trials per optimum (typically $T\!\ge\!50$) and the resulting funnel decomposition depends on~$d$.
 
-A \emph{fitness landscape} is a triple $(S, \mathcal{N}, f)$ where $S$ is a set of candidate solutions, $\mathcal{N}: S \to 2^S$ defines a neighborhood structure, and $f: S \to \mathbb{R}$ is a fitness function~\cite{stadler1996landscapes}.
-For discrete optimization, $S$ is typically a set of binary or $k$-ary strings, and $\mathcal{N}$ defines adjacency via single-position mutations (e.g., bit-flip or operation swap).
-A solution $x^* \in S$ is a \emph{local optimum} (for minimization) if $f(x^*) \le f(y)$ for all $y \in \mathcal{N}(x^*)$.
-The \emph{basin of attraction} of $x^*$ is the set of all solutions from which greedy hill climbing converges to~$x^*$.
-
-\subsection{Classical Landscape Metrics}
-
-\textbf{Fitness-distance correlation (FDC)}~\cite{jones1995fitness} measures the Pearson correlation between $f(x)$ and $d(x, x^*_{\mathrm{global}})$ for sampled solutions $x$, where $d$ is the graph distance.
-High positive FDC (for minimization) indicates that fitness improves toward the global optimum, suggesting the landscape is ``easy'' for local search.
-
-\textbf{Autocorrelation length}~\cite{stadler1996landscapes} is the lag at which the autocorrelation of fitness values along random walks drops below $1/e$.
-Short correlation length indicates a rugged landscape where fitness values change rapidly between neighbors.
-
-\textbf{Information content}~\cite{vassilev2000information} captures the entropy of fitness-change patterns (improving, neutral, worsening) along random walks.
-High entropy indicates an unpredictable, rugged landscape.
-
-\textbf{Basin entropy} measures the Shannon entropy of the basin-size distribution.
-Low entropy (one dominant basin) suggests easy landscapes; high entropy (many small basins) suggests difficult ones.
-Unlike the other metrics, basin entropy requires exhaustive landscape enumeration.
-
-These metrics are informative but capture \emph{global statistical averages}.
-They do not characterize the geometry at specific local optima or identify \emph{which direction} to follow to escape a basin.
-
-\subsection{Local Optima Networks}
-\label{sec:lon}
-
-Local optima networks (LONs)~\cite{ochoa2008first,ochoa2014local,ochoa2017understanding} provide a compressed representation of landscape structure.
-A LON is a directed graph where nodes are local optima and edges represent transitions discovered by perturbation operators followed by hill climbing.
-Specifically, an edge from optimum $x^*_i$ to $x^*_j$ exists if perturbing $x^*_i$ (e.g., flipping $d$ random bits) and then hill-climbing reaches~$x^*_j$.
-LON features such as the number of nodes, number of funnels, and autocorrelation of the LON itself have proven predictive of search difficulty~\cite{ochoa2017understanding}.
-
-While LONs and ORC both capture inter-basin connectivity, they differ in three ways:
-(1)~LON edges are discovered by stochastic perturbation + hill climbing; ORC is computed deterministically in $O(k^4)$.
-(2)~LON edges are binary; ORC provides a signed scalar per neighbor, enabling ranking.
-(3)~ORC requires only 2-hop information; LON construction depends on perturbation distance.
-ORC thus provides a fine-grained, deterministic view complementing the coarser, stochastic LON view.
-
-\subsection{Ollivier--Ricci Curvature on Graphs}
-
-Ollivier~\cite{ollivier2009ricci} introduced a notion of Ricci curvature for metric spaces equipped with Markov chains.
-For a graph $G = (V, E)$ with metric $d$, the ORC of edge $(x, y) \in E$ is:
+Ollivier~\cite{ollivier2009ricci} defined Ricci curvature for metric-measure spaces; Lin et al.~\cite{lin2011ricci} gave a modified graph formulation.
+For a graph edge $(x, y)$:
 \begin{equation}
 \label{eq:orc}
 \kappa(x, y) = 1 - \frac{W_1(\mu_x, \mu_y)}{d(x, y)}
 \end{equation}
-where $\mu_x, \mu_y$ are probability distributions supported on the neighborhoods of $x$ and $y$ (including themselves), and $W_1$ denotes the Wasserstein-1 (earth mover's) distance~\cite{villani2009optimal} with respect to $d$.
-
-Intuitively:
-\begin{itemize}
-\item $\kappa > 0$ (positive curvature): neighborhoods overlap and the space ``contracts'' along $(x,y)$---analogous to a sphere.
-\item $\kappa = 0$ (flat): neighborhoods are optimally aligned---analogous to flat space.
-\item $\kappa < 0$ (negative curvature): neighborhoods diverge and the space ``spreads'' along $(x,y)$---analogous to a saddle.
-\end{itemize}
-
-ORC has been applied to community detection in networks~\cite{ni2019community}, where negative curvature identifies ``bridges'' between communities; to cancer network analysis~\cite{sandhu2015graph}; and to understanding over-squashing in graph neural networks~\cite{topping2022understanding}.
-To our knowledge, ORC has not previously been used for fitness landscape analysis.
+where $\mu_x, \mu_y$ are neighborhood probability measures and $W_1$ is the Wasserstein-1 distance~\cite{villani2009optimal}.
+Negative curvature signals diverging neighborhoods---a signature of community bridges~\cite{ni2019community} and GNN bottlenecks~\cite{topping2022understanding,sandhu2015graph}; positive curvature signals contraction.
+We choose Ollivier's formulation over Forman's~\cite{samal2018comparative}: on triangle-free graphs (including all three neighborhoods in Corollary~\ref{cor:search_spaces}), Forman curvature is the constant $4\!-\!2k$ for every edge on unweighted $k$-regular graphs, and depends only on endpoint-local quantities even with fitness weighting---missing the distributional matching that gives ORC its cross-basin signal.
+To our knowledge, ORC has not been applied to fitness landscape analysis.
 
 
 % ===================================================================
-\section{ORC as a Landscape Metric}
+\section{ORC on Fitness Landscapes}
 \label{sec:method}
 % ===================================================================
 
-\subsection{Fitness-Lifted ORC on Search Graphs}
+\subsection{Fitness-Lifted ORC}
 
-For each node $x$, the support distribution $\mu_x$ is the uniform distribution over $\{x\} \cup \mathcal{N}(x)$.
-On a $k$-regular graph, $|\mathrm{supp}(\mu_x)| = k + 1$ for all $x$.
-
-To compute $W_1(\mu_x, \mu_y)$ for an edge $(x,y)$, we define a \emph{neighborhood-aware transport cost} reflecting the overlap structure of the supports $A = \mathrm{supp}(\mu_x)$ and $B = \mathrm{supp}(\mu_y)$.
-Formally, for $a \in A$ and $b \in B$:
+We define ORC on the search graph $(S, \mathcal{N})$ with uniform measures $\mu_x$ over $\{x\} \cup \mathcal{N}(x)$.
+The transport cost between $a \in \mathrm{supp}(\mu_x)$ and $b \in \mathrm{supp}(\mu_y)$ is:
 \begin{equation}
 \label{eq:lifted}
 c(a, b) = \delta(a, b) + \gamma \cdot |f(a) - f(b)|
 \end{equation}
-where $\gamma \ge 0$ controls the fitness sensitivity and the \emph{overlap indicator} is:
+where $\gamma \ge 0$ controls fitness sensitivity and the overlap indicator is:
 \begin{equation}
 \label{eq:overlap}
-\delta(a, b) = \begin{cases} 0 & \text{if } a = b \\ 1 & \text{if } a \in A \cap B \text{ or } b \in A \cap B \\ 2 & \text{otherwise (both exclusive)} \end{cases}
+\delta(a, b) = \begin{cases} 0 & \text{if } a = b \\ 1 & \text{if } a \text{ or } b \in \mathrm{supp}(\mu_x) \cap \mathrm{supp}(\mu_y) \\ 2 & \text{otherwise (both exclusive)} \end{cases}
 \end{equation}
-Setting $\gamma = 0$ recovers a purely structural curvature; increasing $\gamma$ makes ORC sensitive to the fitness landscape.
-The overlap indicator captures the structural divergence between neighborhoods: edges whose supports overlap extensively incur lower transport costs (positive curvature), while edges connecting largely disjoint supports incur higher costs (negative curvature).
-The indicator is a conservative coarse-graining of graph distance: $\delta(a,b) = 0$ when $d_G(a,b) = 0$ (exact), $\delta = 1$ when at least one element is shared (bounding $d_G \le 1$), and $\delta = 2$ for exclusive pairs ($d_G \le 2$).
-This design is deliberate: $\delta$ can be computed from 2-hop neighborhood information alone, without global shortest-path queries, preserving the $O(k^4)$ locality of ORC while retaining the geometric interpretation of Ollivier's original definition---negative curvature signals neighborhood divergence.
+This is a conservative coarse-graining of graph distance computable from 2-hop information alone, preserving $O(k^2)$ locality.
+For uniform measures of equal support size, $W_1$ reduces to an optimal assignment problem solved by the Hungarian algorithm in $O(k^3)$~\cite{kuhn1955hungarian}; the fine-grained complexity of this reduction has been formally established~\cite{dasgupta2023computing}.
 
-\textbf{Computation.} For uniform measures on finite supports of equal size, $W_1$ reduces to an optimal assignment problem:
+\textbf{Parameter sensitivity.}
+We use $\gamma\!=\!1$ throughout.
+Importantly, the ORC-guided \emph{direction} (Algorithm~\ref{alg:escape}) is $\gamma$-invariant: changing $\gamma$ scales all fitness differences uniformly, so the optimal transport matching order---and thus the min-ORC neighbor---does not change.
+Empirically, escape rates are identical to three decimal places across $\gamma \in \{0.1, 0.5, 1.0, 2.0\}$ on all 480 instances; only absolute curvature values change.
+The framework is thus parameter-free for navigation; $\gamma$ matters only for difficulty prediction, where $\gamma\!=\!1$ balances structural and fitness terms.
+This invariance is a consequence of the \emph{linear} fitness term in Eq.~\eqref{eq:lifted}: a nonlinear cost $g(|f(a)-f(b)|)$ would break it, though such extensions are a natural direction for future work.
+
+\subsection{Why ORC Sees What 1-Hop Methods Cannot}
+
+\begin{proposition}[ORC Cross-Neighborhood Decomposition]
+\label{prop:decomposition}
+Let $G = (V,E)$ be a regular graph of degree $k$ in which adjacent nodes share no common neighbors: $\mathcal{N}(x) \cap \mathcal{N}(y) = \emptyset$ for all $(x,y) \in E$.
+Then $|\mathrm{supp}(\mu_{x^*}) \cap \mathrm{supp}(\mu_y)| = 2$ (only $x^*$ and $y$ are shared), and the optimal transport cost decomposes as:
 \begin{equation}
-W_1(\mu_x, \mu_y) = \frac{1}{k+1} \min_{\sigma \in \Pi_{k+1}} \sum_{i=1}^{k+1} c(a_i, b_{\sigma(i)})
+(k\!+\!1)\,W_1(\mu_{x^*}, \mu_y) = C_{\mathrm{shared}} + \min_{\sigma} \sum_{i=1}^{k-1} \bigl[2 + \gamma\,|f(a_i) - f(b_{\sigma(i)})|\bigr]
 \end{equation}
-which we solve via the Hungarian algorithm in $O(k^3)$ time~\cite{kuhn1955hungarian}.
-The ORC is then $\kappa(x,y) = 1 - W_1(\mu_x, \mu_y) / c(x,y)$, where $c(x,y) = 1 + \gamma|f(x) - f(y)|$ since $x$ and $y$ are always shared elements ($x \in A \cap B$ and $y \in A \cap B$).
+where $C_{\mathrm{shared}} \le 2 + \gamma(\Delta + \Delta')$ accounts for the two shared elements, $\{a_i\} = \mathcal{N}(x^*) \setminus \{y\}$, $\{b_j\} = \mathcal{N}(y) \setminus \{x^*\}$ are the $k\!-\!1$ exclusive neighbors on each side, and $\sigma$ ranges over permutations of $\{1,\ldots,k\!-\!1\}$.
+\end{proposition}
 
-\textbf{Computational complexity.} Computing ORC for all edges incident to a single node requires $k$ Hungarian algorithm solves on $(k\!+\!1) \times (k\!+\!1)$ cost matrices, giving $O(k^4)$ per node.
-For the full landscape, computing ORC at all $L$ local optima costs $O(L \cdot k^4)$.
-In practice, NK landscapes with $k=16$ require ${\sim}2$\,ms per optimum and $k=20$ requires ${\sim}4$\,ms.
+\begin{proof}
+Since $\mathcal{N}(x^*) \cap \mathcal{N}(y) = \emptyset$, the only shared support elements are $x^*$ and $y$ themselves.
+Any assignment $\pi: \mathrm{supp}(\mu_{x^*}) \to \mathrm{supp}(\mu_y)$ partitions into: (i)~the two shared positions ($x^*, y$) contributing $C_{\mathrm{shared}}$, and (ii)~the $k\!-\!1$ exclusive pairs, each incurring $\delta = 2$ plus a fitness-difference term.
+The optimal $\sigma$ minimizes the total fitness-comparison cost.
+\end{proof}
 
-\subsection{Theoretical Foundation}
+\begin{corollary}[Applicability to Standard Search Spaces]
+\label{cor:search_spaces}
+Proposition~\ref{prop:decomposition} applies to:
+\textbf{(i)}~the $N$-dimensional binary hypercube with bit-flip neighborhood ($k = N$),
+\textbf{(ii)}~the symmetric group $S_n$ with pairwise-swap neighborhood ($k = \binom{n}{2}$), and
+\textbf{(iii)}~Hamiltonian tours with 2-opt neighborhood ($k = n(n\!-\!3)/2$).
+\end{corollary}
+
+\begin{proof}
+\textbf{(i)} On the hypercube, flipping bit $i$ in $x$ and bit $j$ in $y = x \oplus e_p$ yields the same neighbor only if $e_i = e_p \oplus e_j$; since single bit-flips cannot equal a two-bit change, $\mathcal{N}(x) \cap \mathcal{N}(y) = \emptyset$.
+\textbf{(ii)} On $S_n$, if $y = x \circ \tau_{ab}$, a common neighbor $z$ requires $\tau_{ij} = \tau_{ab} \circ \tau_{kl}$ for transpositions $\tau_{ij}$, $\tau_{kl}$.
+The product of two distinct transpositions is a 3-cycle or double transposition---never a transposition.
+\textbf{(iii)} A 2-opt move is a segment reversal $\rho_{p,q}$ mapping position $i \mapsto p\!+\!q\!+\!1\!-\!i$ for $i \in \{p\!+\!1,\dots,q\}$ and fixing all others---an affine map with \emph{slope $-1$} on its support.
+A common neighbor requires $\rho_{a,b} = \rho_{c,d} \circ \rho_{p,q}$ for distinct non-trivial reversals.
+\emph{Disjoint supports:} the composition has non-contiguous support (two separated intervals with a fixed gap), impossible for a single reversal.
+\emph{One nested in the other} (WLOG $\mathrm{supp}(\rho_{p,q}) \subset \mathrm{supp}(\rho_{c,d})$): on the inner interval, $(\rho_{c,d} \circ \rho_{p,q})(i) = i + \delta$ is a \emph{translation} (slope $+1$), since each reversal contributes slope $-1$ and $(-1)(-1) = +1$.
+Any single reversal has slope $-1$ on its entire support, so the composition cannot be one.
+\emph{Partial overlap:} within the overlap the composition transitions from slope $+1$ (where both act) to slope $-1$ (where only one acts)---again incompatible with a single reversal.
+Verified computationally at $n \le 8$ (all 25{,}200 edges) and by sampling at $n \le 11$ (all $>$200{,}000 tested edges have overlap 0).
+\end{proof}
+
+These three search spaces---binary strings (SAT, NK), permutations with swaps (QAP, scheduling), and tours with 2-opt (TSP)---cover the foundational neighborhoods in combinatorial optimization.
+
+The exclusive-pair term is the key: it computes an optimal matching between the fitness distributions visible from $x^*$ and from~$y$.
+At a basin boundary, the two sides' fitness distributions diverge, making curvature strongly negative.
+By contrast, LON-d1 evaluates each neighbor $y$ using only $f(y)$ and the downstream hill-climbing destination, discarding the $(k\!-\!1)$ exclusive neighbors entirely---precisely the distributional comparison that ORC captures.
+
+\subsection{Negative Curvature Guarantee}
 \label{sec:theory}
-
-We establish that negative ORC at local optima is not merely an empirical observation but a structural consequence of local optimality on Hamming graphs.
 
 \begin{theorem}
 \label{thm:negative}
-Let $G$ be the $N$-dimensional binary hypercube ($N \ge 4$) with the neighborhood-aware transport cost~\eqref{eq:lifted}--\eqref{eq:overlap} and $\gamma > 0$.
-Let $x^*$ be a strict local optimum, i.e., $f(x^*) < f(y)$ for all $y \in \mathcal{N}(x^*)$.
-If there exists a neighbor $y$ with
-\begin{equation}
-\label{eq:threshold}
-f(y) - f(x^*) < \frac{N - 3}{(N+1)\,\gamma}\,,
-\end{equation}
-then $\kappa(x^*, y) < 0$.
+Let $x^*$ be a strict local optimum on any degree-$k$ graph satisfying the disjoint-neighborhood condition of Proposition~\ref{prop:decomposition} ($k \ge 4$), with cost~\eqref{eq:lifted}--\eqref{eq:overlap} and $\gamma > 0$.
+If neighbor $y$ satisfies $\Delta = f(y) - f(x^*) < (k\!-\!3)/((k\!+\!1)\gamma)$, then $\kappa(x^*,y) < 0$.
 \end{theorem}
 
 \begin{proof}
-Write $A = \{x^*\} \cup \mathcal{N}(x^*)$ and $B = \{y\} \cup \mathcal{N}(y)$, with $|A| = |B| = N + 1$.
-On the hypercube, adjacent nodes share no common neighbors, so $A \cap B = \{x^*, y\}$ and $|A \setminus B| = |B \setminus A| = N - 1$.
-
-We show that every bijection $\sigma\!: A \to B$ satisfies $\sum_a \delta(a, \sigma(a)) \ge 2(N\!-\!1)$.
-A pair has $\delta = 0$ (self-match), $\delta = 1$ (shared element involved), or $\delta = 2$ (both exclusive).
-There are exactly two shared ``row'' positions ($x^*, y$ in $A$) and two shared ``column'' positions ($x^*, y$ in $B$).
-If both self-match: the $N\!-\!1$ remaining pairs are exclusive-to-exclusive ($\delta=2$ each), giving total $2(N\!-\!1)$.
-If one self-match is broken: it is replaced by one $\delta\!=\!1$ pair (shared row to exclusive column) and one $\delta\!=\!1$ pair (exclusive row to shared column), removing one $\delta\!=\!2$ pair. Net change: $-0 + 1 + 1 - 2 = 0$; total unchanged.
-If both self-matches are broken: similarly, four $\delta\!=\!1$ pairs replace two $\delta\!=\!0$ and two $\delta\!=\!2$; total $4 + 2(N\!-\!3) = 2(N\!-\!1)$.
-In all cases $\sum_a \delta(a, \sigma(a)) \ge 2(N\!-\!1)$.
-Since $\gamma|f(a)\!-\!f(\sigma(a))| \ge 0$, we have $\sum_a c(a, \sigma(a)) \ge 2(N\!-\!1)$.
-
-Therefore $W_1 \ge 2(N\!-\!1)/(N\!+\!1)$.
+From Proposition~\ref{prop:decomposition}, every assignment incurs exclusive-pair structural cost at least $2(k\!-\!1)$, giving $W_1 \ge 2(k\!-\!1)/(k\!+\!1)$.
 With edge cost $c(x^*,y) = 1 + \gamma\Delta$:
-\[
-\kappa(x^*,y) = 1 - \frac{W_1}{c(x^*,y)} \le 1 - \frac{2(N-1)}{(N+1)(1+\gamma\Delta)}\,.
-\]
-This is negative iff $\Delta < (N\!-\!3)/((N\!+\!1)\gamma)$, which is positive for $N \ge 4$.
+$\kappa(x^*,y) \le 1 - 2(k-1)/[(k+1)(1+\gamma\Delta)]$,
+which is negative iff $\Delta < (k-3)/((k+1)\gamma)$.
 \end{proof}
 
-\begin{remark}
-\label{rem:condition}
-For $N = 16$ and $\gamma = 1$, the condition requires $\Delta < 13/17 \approx 0.76$.
-Across all 5{,}075+ local optima in our NK and W-model benchmarks, the smallest fitness gap at each optimum satisfies $\max(\Delta_{\min}) = 0.21$, well within the bound.
-The condition is generically satisfied because local optima on NK landscapes always possess at least one ``nearly flat'' neighboring direction.
-Empirically, every local optimum across all 530+ instances satisfies the condition, confirming that negative ORC is a universal structural feature of these landscapes.
-\end{remark}
+For the binary hypercube with $k = N = 16$, $\gamma = 1$: the bound requires $\Delta < 0.76$.
+For QAP with $n = 8$ ($k = 28$): $\Delta < 0.86$.
+Across all 5{,}000+ local optima in our binary benchmarks and 1{,}500+ QAP optima, \textbf{100\% satisfy the condition}.
+The min-ORC neighbor $y^* = \arg\min_y \kappa(x^*, y)$ identifies the direction of maximal neighborhood divergence---the strongest saddle direction (Alg.~\ref{alg:escape}).
 
-\begin{corollary}
-\label{cor:saddle}
-The minimum-ORC neighbor $y^* = \arg\min_{y \in \mathcal{N}(x^*)} \kappa(x^*, y)$ identifies the direction of maximal transport cost between the neighborhoods of $x^*$ and $y$---geometrically, the strongest ``saddle'' direction.
-Combined with the explicit bound~\eqref{eq:threshold}, this provides a geometrically grounded escape heuristic with provable guarantees on Hamming graphs.
-\end{corollary}
-
-The corollary directly yields an escape procedure:
+\subsection{ORC-Guided Escape and the OTG}
+\label{sec:otg_def}
 
 \begin{algorithm}[t]
 \caption{ORC-Guided Escape from a Local Optimum}
@@ -237,9 +194,10 @@ The corollary directly yields an escape procedure:
 \end{algorithmic}
 \end{algorithm}
 
-The \%ORC column in Table~\ref{tab:orc_summary} reports the success rate of Algorithm~\ref{alg:escape}: the fraction of local optima where this procedure reaches a strictly better optimum.
-The \%Rand column measures the same procedure with step~4 replaced by uniform random neighbor selection, providing a direct algorithmic comparison.
-This motivates our key experimental question: does the min-ORC direction actually lead to a \emph{better} local optimum more often than a randomly chosen direction?
+Applying Algorithm~\ref{alg:escape} at every local optimum of a landscape defines the \emph{ORC Transition Graph}~(OTG): a deterministic directed graph where each optimum has exactly one outgoing edge to the optimum reached by following its min-ORC neighbor and hill-climbing.
+The OTG is a functional graph; its terminal attractors are either self-loops (sinks) or directed cycles.
+The \emph{funnel} of an attractor is the set of all optima whose OTG path converges to it.
+Unlike LONs~\cite{tomassini2022lon}, the OTG is deterministic and parameter-free: it requires no perturbation distance or stochastic trials.
 
 
 % ===================================================================
@@ -247,48 +205,83 @@ This motivates our key experimental question: does the min-ORC direction actuall
 \label{sec:setup}
 % ===================================================================
 
-\subsection{Benchmark Landscapes}
+\subsection{Benchmark Problems}
+\label{sec:benchmarks}
 
-\textbf{NK Landscapes}~\cite{kauffman1993origins}.
-Binary strings of length $N$ with epistasis parameter $K$ controlling ruggedness.
-Each locus contributes to fitness based on its own value and $K$ epistatic dependencies; higher $K$ increases the number of local optima.
-We use the adjacent interaction model and bit-flip neighborhood ($k = N$).
+We evaluate on five benchmark families spanning three search spaces:
 
-\emph{N=16:} $K \in \{0, 2, 4, 6, 8, 12, 15\}$, 30 instances per $K$ (210 total).
-Additionally, 90 instances with random interaction model ($K \in \{2, 6, 12\}$).
-Full enumeration of all $2^{16} = 65{,}536$ solutions.
+\textbf{NK landscapes}~\cite{kauffman1993origins} define tunably rugged fitness via $K$~epistatic interactions per bit on length-$N$ binary strings.
+We test $K \in \{4, 8, 12\}$ at $N\!=\!16$ (30 instances each, full enumeration).
 
-\emph{N=20:} $K \in \{0, 4, 8, 15, 19\}$, 10 instances per $K$ (50 total).
-Full enumeration of all $2^{20} = 1{,}048{,}576$ solutions.
-This larger scale validates that our findings are not artifacts of the toy-scale $N=16$.
+\textbf{W-model}~\cite{weise2014difficult} applies neutrality, epistasis, and ruggedness transformations controlled by a difficulty parameter $\nu$ to a base OneMax problem.
+We test $\nu \in \{3, 4, 6\}$ at $N\!=\!16$ (30 instances each, full enumeration).
 
-\textbf{W-Model}~\cite{weise2014difficult}.
-Binary strings of length $n\!=\!16$ with epistasis parameter $\nu \in \{1, 3, 4, 6, 8, 16\}$.
-The W-model applies a chain of transformations (neutrality, epistasis, ruggedness) to a base OneMax-like problem, providing a complementary class of tunably difficult landscapes.
-We set neutrality $\mu\!=\!1$ and ruggedness parameter $\gamma_W\!=\!0$, varying only epistasis.
-Bit-flip neighborhood ($k\!=\!16$). Full enumeration. 30 instances per $\nu$ (180 total).
+\textbf{Random MAX-SAT.}
+Random 3-SAT instances with $N \in \{20, 50, 100\}$ variables and clause-to-variable ratio $\alpha \in \{3.0, \ldots, 6.0\}$ (20 instances each).
+Local optima are collected via random-restart HC (500--2{,}000 restarts).
+This domain has well-studied phase transitions~\cite{ochoa2020maxsat} and no structural overlap with NK or W-model.
 
-\textbf{NAS-Bench-201}~\cite{dong2020bench}.
-15{,}625 neural architectures defined by 6 operation choices from 5 options.
-Hamming-1 neighborhood ($k\!=\!24$).
-Fitness $= 100 - \text{accuracy}$ on CIFAR-10.
-Real benchmark data from NATS-Bench~\cite{dong2021nats}.
+\textbf{Random QAP.}
+Quadratic assignment problems with uniform random flow\slash distance matrices and pairwise-swap neighborhood, $n \in \{6, 7, 8, 9\}$ (20~instances each, full enumeration).
 
-\subsection{Metrics Computed}
+\textbf{Random TSP.}
+Random-matrix TSP instances with 2-opt neighborhood.
+Full enumeration at $n \in \{8, 9, 10\}$ (20 each, 4--7 optima per instance); sampling-based analysis at $n \in \{15, 20, 30, 50\}$ (20 each, 300 random-restart 2-opt runs per instance).
+TSP instances at small $n$ serve to validate the theoretical framework on an exact ground truth; sampling-based runs at larger $n$ test scaling.
+
+The five families were chosen to cover three distinct search spaces (binary strings, permutations, tours), a range of landscape ruggedness levels, and both enumerable and sampling-only regimes.
+
+\subsection{Algorithms and Baselines}
+\label{sec:baselines}
+
+\textbf{Hill Climbing~(HC).}
+Best-improvement (steepest descent) HC: at each step, all $k$ neighbors are evaluated and the one with the best fitness is selected.
+HC terminates when no neighbor improves on the current solution, yielding a local optimum.
+Ties are broken uniformly at random.
+
+\textbf{Random-Restart Hill Climbing~(RR-HC).}
+Repeat HC from uniformly random initial solutions until the budget of fitness evaluations~(FEs) is exhausted.
+Return the best local optimum found.
+
+\textbf{Iterated Local Search~(ILS)}~\cite{lourenco2003ils}.
+From a local optimum, apply a perturbation (bit-flips) and re-run HC; repeat until the FE budget is exhausted.
+We test four ILS variants, all using a fixed perturbation strength of 3~bit-flips for fair comparison:
+\begin{itemize}
+\item \textbf{Rand-ILS}: flip 3 random bits.
+\item \textbf{ORC+Pert}: flip the min-ORC bit (Algorithm~\ref{alg:escape}) plus 2 random bits.
+\item \textbf{ORC-ILS}: flip only the min-ORC bit (1 bit; no random component).
+\item \textbf{MG-ILS}: flip only the MinGap bit (1 bit; see below).
+\end{itemize}
+ORC-ILS and MG-ILS use only 1-bit perturbation; they are included as ablations to isolate the effect of the directed bit.
+
+\textbf{MinGap.}
+The neighbor $y$ with the smallest fitness difference $|f(y) - f(x^*)|$ (argmin-$|\Delta|$ heuristic).
+This greedy baseline uses only fitness values, not distributional information.
+
+\textbf{LON-d1.}
+At a local optimum $x^*$, the LON-d1 destination is the mode HC outcome over all $k$ single-bit-flip neighbors (1-hop, deterministic).
+
+\textbf{LON-d3.}
+At a local optimum $x^*$, the LON-d3 destination is the mode HC outcome from 100 random 3-bit perturbations (3-hop, stochastic).
+
+\subsection{Evaluation Metrics}
 \label{sec:metrics}
 
-For each landscape instance, we compute:
-\begin{itemize}
-\item \textbf{ORC features}: (i)~fraction of local optima with $\exists y: \kappa(x^*,y) < 0$; (ii)~fraction where the most negative ORC direction leads to a better local optimum via hill climbing (\%ORC$\to$better); (iii)~mean ORC across all edges at local optima.
-\item \textbf{Random-direction baseline}: for each local optimum, we select a uniformly random neighbor, hill-climb from it, and check if the resulting optimum is strictly better.
-This is repeated 30 times per optimum and averaged (\%Rand$\to$better).
-\item \textbf{Worst-ORC baseline}: following the most positive ORC direction and checking if it leads to a better optimum (\%Worst$\to$better).
-\item \textbf{Classical metrics}: FDC, autocorrelation length, information content ($H$), partial information content ($M$), basin entropy.
-\item \textbf{Algorithm performance}: success rate of random search~(RS), hill climbing~(HC), and $(1\!+\!1)$~EA, each with 50~trials and budget~$5\%$ of the search space.
-\end{itemize}
+\textbf{Escape rate~(\%).}
+Fraction of local optima where a method reaches a strictly better optimum after one perturbation + HC step.
+This is the primary metric shared across all experiments.
 
-We use $\gamma = 1.0$ for the transport cost throughout.
-All experiments use 150 parallel workers on a 160-core server; full analysis of all 530 instances completes in under 10 minutes.
+\textbf{Mean terminal rank.}
+Normalized fitness rank of the attractor reached by following OTG/LON paths (0.0 = best, 0.5 = random).
+
+\textbf{Top-5\% attractor~(\%).}
+Fraction of optima whose OTG/LON path terminates at an attractor in the top 5\% by fitness.
+
+\textbf{Compression.}
+$\#$funnels~$/$~$\#$optima---lower means better funnel aggregation.
+
+\textbf{Success rate~(\%).}
+Fraction of ILS runs finding the global optimum within the FE budget (used for the ILS comparison in Section~\ref{sec:ils}).
 
 
 % ===================================================================
@@ -296,241 +289,315 @@ All experiments use 150 parallel workers on a 160-core server; full analysis of 
 \label{sec:results}
 % ===================================================================
 
-\subsection{ORC Universally Detects Saddle Directions}
+\subsection{Single-Step Escape Analysis}
+\label{sec:escape}
 
 \begin{table}[t]
-\caption{ORC landscape analysis. All values are means over instances per configuration. ``\%ORC'': fraction of local optima where the min-ORC direction leads to a better optimum. ``\%Rand'': same for a random direction (30 trials). ``\%Worst'': same for the max-ORC (most positive curvature) direction. ``Adv.'': ratio \%ORC/\%Rand. The ORC advantage is significant at $p < 0.001$ (paired Wilcoxon signed-rank test) for all non-degenerate configurations ($K > 0$, $\nu > 1$) except $\nu\!=\!16$; see text. $^\dagger$Not significant (negative control; see text).}
-\label{tab:orc_summary}
+\caption{ORC escape direction analysis on binary landscapes ($N\!=\!16$, full enumeration). \%ORC: fraction of local optima where Algorithm~\ref{alg:escape} reaches a better optimum. \%MinGap: same using the argmin-$|\Delta|$ heuristic. \%Rand: random neighbor baseline (30 trials). The ORC advantage over MinGap emerges on epistatic W-model landscapes where the fitness-distance relationship is distorted.}
+\label{tab:escape}
 \centering
 \small
-\begin{tabular}{@{}lrrrrrr@{}}
+\begin{tabular}{@{}lrrrrrrr@{}}
 \toprule
-\textbf{Config} & \textbf{\#Opt.} & \textbf{\%ORC} & \textbf{\%Rand} & \textbf{\%Worst} & \textbf{Adv.} & \textbf{HC\%} \\
+\textbf{Config} & \textbf{\#Opt} & \textbf{\%ORC} & \textbf{\%MinGap} & \textbf{\%Rand} & \textbf{ORC/R} & \textbf{ORC/MG} & \textbf{Agree} \\
 \midrule
-NK $N\!=\!16$, $K\!=\!2$     & 31    & 46.4 & 22.5 & 4.8  & 2.1$\times$ & 89.7 \\
-NK $N\!=\!16$, $K\!=\!4$     & 170   & 59.6 & 31.6 & 8.9  & 1.9$\times$ & 69.8 \\
-NK $N\!=\!16$, $K\!=\!6$     & 463   & 59.4 & 33.1 & 11.5 & 1.8$\times$ & 55.5 \\
-NK $N\!=\!16$, $K\!=\!8$     & 888   & 58.5 & 33.6 & 12.4 & 1.7$\times$ & 33.5 \\
-NK $N\!=\!16$, $K\!=\!12$    & 2249  & 51.1 & 37.6 & 23.5 & 1.4$\times$ & 13.1 \\
-NK $N\!=\!16$, $K\!=\!15$    & 3856  & 49.3 & 46.9 & 45.5 & 1.1$\times$ & 3.7  \\
+NK $K\!=\!4$     & 170   & 59.6 & 57.4 & 31.6 & 1.9$\times$ & 1.04$\times$ & 89.6\% \\
+NK $K\!=\!8$     & 888   & 58.5 & 56.5 & 33.6 & 1.7$\times$ & 1.04$\times$ & 90.3\% \\
+NK $K\!=\!12$    & 2249  & 51.1 & 49.4 & 37.6 & 1.4$\times$ & 1.03$\times$ & 91.7\% \\
 \midrule
-NK $N\!=\!20$, $K\!=\!4$     & 557   & 62.3 & 31.2 & 6.0  & 2.0$\times$ & 92.6 \\
-NK $N\!=\!20$, $K\!=\!8$     & 5012  & 62.5 & 34.1 & 11.1 & 1.8$\times$ & 79.6 \\
-NK $N\!=\!20$, $K\!=\!15$    & 26086 & 52.9 & 37.2 & 21.2 & 1.4$\times$ & 17.4 \\
-NK $N\!=\!20$, $K\!=\!19$    & 49966 & 49.5 & 47.5 & 46.5 & 1.0$\times$ & 3.4  \\
-\midrule
-W $\nu\!=\!3$                & 406   & 79.9 & 29.4 & 13.4 & \textbf{2.7$\times$} & 0.3  \\
-W $\nu\!=\!4$                & 3732  & 59.7 & 39.5 & 33.9 & 1.5$\times$ & 1.1  \\
-W $\nu\!=\!6$                & 5836  & 63.9 & 48.6 & 46.7 & 1.3$\times$ & 3.7  \\
-W $\nu\!=\!8$                & 7672  & 66.7 & 55.9 & 55.3 & 1.2$\times$ & 1.8  \\
-W $\nu\!=\!16$               & 12870 & 80.1 & 80.6 & 70.7 & 1.0$\times$ & 2.9  \\
-\midrule
-NAS-201$^\dagger$            & 625   & 44.0 & 44.7 & 45.9 & 1.0$\times$ & 2.0  \\
+W $\nu\!=\!3$    & 406   & 79.9 & 43.5 & 29.4 & \textbf{2.7$\times$} & \textbf{1.84$\times$} & 59.6\% \\
+W $\nu\!=\!4$    & 3732  & 59.7 & 25.9 & 39.5 & 1.5$\times$ & \textbf{2.31$\times$} & 43.3\% \\
+W $\nu\!=\!6$    & 5836  & 63.9 & 37.4 & 48.6 & 1.3$\times$ & 1.71$\times$ & 52.7\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:orc_summary} presents our main results.
-Two findings stand out.
+Table~\ref{tab:escape} presents the single-step escape analysis.
+On NK landscapes, ORC beats random by $1.4$--$1.9\times$ but only marginally outperforms MinGap ($1.03$--$1.04\times$); on these regular Hamming graphs the fitness gradient already captures most of the cross-basin signal.
+On W-model landscapes, where epistasis distorts the fitness-distance relationship, ORC's advantage over MinGap becomes substantial: $2.31\times$ at $\nu\!=\!4$, with only 43\% agreement between the two methods.
 
-First, \textbf{100\% of local optima exhibit at least one negative-ORC direction} across every benchmark configuration.
-Theorem~\ref{thm:negative} provides a structural explanation: on the hypercube, the overlap structure of adjacent neighborhoods forces a minimum transport cost of $2(N\!-\!1)/(N\!+\!1) > 1$ per unit of edge cost, which exceeds the normalizing edge cost whenever the fitness gap $\Delta$ satisfies the explicit bound~\eqref{eq:threshold}.
-Remark~\ref{rem:condition} confirms that all tested optima satisfy this condition.
+\textbf{When ORC and MinGap disagree, ORC wins.}
+On W~$\nu\!=\!3$, ORC's choice leads to a better basin in \textbf{78.7\%} of disagreements vs.\ MinGap's 0.3\% (21\% ties).
+On NK $K\!=\!4{,}8$, ORC wins 43--44\% vs.\ MinGap's 24--25\%.
+MinGap almost never outperforms ORC when the two disagree, confirming that ORC's optimal transport matching captures cross-basin structure that the fitness-gap heuristic misses.
 
-Second, and more importantly, \textbf{following the most negative ORC direction leads to a better local optimum significantly more often than a random direction}.
-The ``Adv.''\ column shows \%ORC/\%Rand, ranging from 2.7$\times$ (W-model $\nu\!=\!3$) to ${\sim}1.0\times$ for maximally rugged landscapes ($K\!=\!15$, $K\!=\!19$, $\nu\!=\!16$).
-NAS-Bench-201 serves as a \emph{negative control}: with only 4\% of solutions being local optima, the landscape has a near-unimodal funnel where virtually any escape direction leads to improvement; the~1.0$\times$ advantage (not significant) confirms that ORC does not over-claim on benign landscapes.
-Paired Wilcoxon signed-rank tests confirm significance ($p < 0.001$) for all configurations with non-trivial structure---only degenerate cases ($K\!=\!0$, $\nu\!=\!1$) and the maximally rugged $\nu\!=\!16$ fail to reach significance.
+\textbf{ORC ranks all escape directions.}
+Spearman correlation between ORC values and destination quality: mean $\rho\!=\!0.44$ on W $\nu\!=\!3$ (95\% positive), $\rho\!=\!0.33$ on NK---more negative curvature $\to$ better destination basin.
 
-\subsection{The ORC Advantage Is Strongest When It Matters Most}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\textwidth]{figures/fig_orc_advantage.pdf}
-\caption{Fraction of local optima where following the min-ORC, random, or max-ORC (worst) direction leads to a strictly better local optimum. Error bars: standard error over 30 instances (N=16). The ORC advantage is largest at moderate ruggedness, where inter-basin transitions are neither trivial nor impossible.}
-\label{fig:advantage}
-\end{figure}
-
-Figure~\ref{fig:advantage} shows the ORC advantage across all benchmark configurations.
-A clear pattern emerges: the advantage is largest at \emph{moderate} ruggedness (NK $K = 4{-}8$, W-model $\nu = 3$) and diminishes toward both extremes.
-
-This pattern is geometrically intuitive.
-At low ruggedness ($K = 0{-}2$), the landscape has few optima and basin boundaries are obvious---even random perturbation finds improving directions.
-At extreme ruggedness ($K = 15$, $\nu = 16$), the landscape is essentially random: all directions are equally (un)promising because the fitness function has no exploitable structure.
-The ORC advantage peaks precisely in the ``interesting'' regime where the landscape has meaningful but non-trivial structure---the regime most relevant to practical optimization.
-
-The W-model $\nu = 3$ result is particularly striking: ORC identifies improving directions in 79.9\% of cases while random direction succeeds only 29.4\% of the time (2.7$\times$ advantage), despite the HC success rate being a mere 0.3\%.
-This demonstrates that ORC detects \emph{actionable} landscape structure that is invisible to global metrics.
-
-\subsection{Results Scale to $N = 20$}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\textwidth]{figures/fig_trends.pdf}
-\caption{ORC advantage trends. (a)~NK landscapes: min-ORC vs.\ random direction success rate as a function of epistasis $K$, for both $N\!=\!16$ (solid) and $N\!=\!20$ (dotted). (b)~W-model: same comparison as a function of epistasis $\nu$. The ORC advantage is consistent across problem sizes.}
-\label{fig:trends}
-\end{figure}
-
-A potential concern is that $N\!=\!16$ ($2^{16} = 65{,}536$ solutions) is a toy scale.
-To address this, we ran the full analysis at $N\!=\!20$ ($2^{20} \approx 10^6$ solutions) for NK landscapes.
-Table~\ref{tab:orc_summary} (middle rows) shows that the ORC advantage is \emph{at least as strong} at $N\!=\!20$: 62.3\% vs.\ 31.2\% at $K\!=\!4$ (2.0$\times$) and 62.5\% vs.\ 34.1\% at $K\!=\!8$ (1.8$\times$).
-
-Figure~\ref{fig:trends}(a) confirms that the $N\!=\!20$ curves closely track the $N\!=\!16$ curves, suggesting that the ORC advantage is a robust structural property rather than a finite-size artifact.
-Each $N\!=\!20$ instance requires about 60 seconds for full analysis (1M solutions, ORC at up to 50{,}000 local optima), demonstrating computational feasibility at non-trivial scales.
-
-\subsection{ORC Correlates with Problem Difficulty}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.55\textwidth]{figures/fig_scatter_orc_hc.pdf}
-\caption{Mean ORC at local optima vs.\ HC success rate across 420 non-trivial instances ($N\!=\!16$). Each point is one instance, colored by benchmark type. More negative ORC (stronger neighborhood divergence) correlates with harder problems.}
-\label{fig:scatter}
-\end{figure}
+\subsection{OTG vs.\ LON: Funnel Detection from Local Data}
+\label{sec:otg_vs_lon}
 
 \begin{table}[t]
-\caption{Spearman rank correlations ($\rho$) between landscape metrics and algorithm performance across all 420 $N\!=\!16$ instances with $>1$ local optimum. $^{***}$: $p < 0.001$. The best value in each column is \textbf{bolded}.}
-\label{tab:correlation}
+\caption{OTG vs.\ LON funnel quality ($N\!=\!16$, full enumeration). LON-d1: 1-hop, deterministic. LON-d3: 3-hop, 100 stochastic trials. Rank: 0.0 = best, 0.5 = random. Compression: \#funnels / \#optima.}
+\label{tab:otg_vs_lon}
 \centering
 \small
-\begin{tabular}{@{}lrrr@{}}
+\begin{tabular}{@{}lr|rrr|rrr|rrr@{}}
 \toprule
-\textbf{Feature} & \textbf{HC success} & \textbf{EA success} & \textbf{RS mean fit.} \\
+& & \multicolumn{3}{c|}{\textbf{Mean terminal rank}} & \multicolumn{3}{c|}{\textbf{Top-5\% attractor}} & \multicolumn{3}{c}{\textbf{Compression}} \\
+\textbf{Config} & \textbf{\#Opt} & \textbf{OTG} & \textbf{d1} & \textbf{d3} & \textbf{OTG} & \textbf{d1} & \textbf{d3} & \textbf{OTG} & \textbf{d1} & \textbf{d3} \\
 \midrule
-Mean ORC (ours)               & $-0.670^{***}$ & $\mathbf{-0.652}^{***}$ & $-0.455^{***}$ \\
-\%ORC$\to$better (ours)       & $-0.435^{***}$ & $-0.174^{***}$ & $-0.615^{***}$ \\
-\%Rand$\to$better             & $-0.659^{***}$ & $-0.392^{***}$ & $-0.552^{***}$ \\
+NK $K\!=\!4$ & 170  & .255 & .490 & \textbf{.181} & 24.6 & 5.6 & \textbf{30.1} & 40 & 98 & 35 \\
+NK $K\!=\!8$ & 888  & .231 & .476 & \textbf{.099} & 24.0 & 6.0 & \textbf{46.1} & 42 & 97 & 16 \\
 \midrule
-FDC                           & $0.276^{***}$  & $0.501^{***}$  & $0.024$        \\
-Autocorrelation length        & $0.543^{***}$  & $0.544^{***}$  & $0.372^{***}$  \\
-Information content $H$       & $-0.308^{***}$ & $0.306^{***}$  & $-0.585^{***}$ \\
-Basin entropy                 & $\mathbf{-0.731}^{***}$ & $-0.460^{***}$ & $\mathbf{-0.610}^{***}$ \\
+W $\nu\!=\!3$  & 406  & \textbf{.037} & .340 & .077 & \textbf{90.7} & 23.2 & 77.3 & 15 & 98 & 21 \\
+W $\nu\!=\!4$  & 3732 & .073 & .258 & \textbf{.012} & 73.7 & 20.0 & \textbf{97.8} & 13 & 75 & 2 \\
+W $\nu\!=\!6$  & 5836 & .066 & .221 & \textbf{.011} & 68.5 & 18.3 & \textbf{96.3} & 14 & 68 & 1 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.65\textwidth]{figures/fig_correlation_heatmap.pdf}
-\caption{Spearman rank correlations between all landscape metrics and algorithm performance targets. ORC-based features (top rows) show strong, consistent correlations across all targets, unlike FDC and information content which are inconsistent in sign.}
-\label{fig:heatmap}
-\end{figure}
+Both OTG and LON-d1 use only 1-hop data, making this an equal-information comparison.
+LON-d1 yields 97--98\% singleton funnels; OTG compresses to 13--42\% funnels with substantially better attractor quality.
+On W $\nu\!=\!3$: OTG rank 0.037 vs.\ LON-d1's 0.340 ($9.2\times$ improvement); 90.7\% reach top-5\% vs.\ 23.2\%.
+The OTG even outperforms LON-d3 (3-hop, stochastic) on W $\nu\!=\!3$ (rank 0.037 vs.\ 0.077); at higher epistasis ($\nu \ge 4$), LON-d3's wider perturbation provides superior attractor quality.
+Path to top-5\% attractors: median 2 hops, P90 3 hops.
 
-Table~\ref{tab:correlation} and Figures~\ref{fig:scatter}--\ref{fig:heatmap} present the correlation analysis.
-Key findings:
-
-\begin{enumerate}
-\item \textbf{Mean ORC} achieves the strongest correlation with HC difficulty ($\rho = {-}0.670$) among metrics that do not require full landscape enumeration, exceeding FDC~($0.276$) and information content~(${-}0.308$).
-Only basin entropy ($\rho = {-}0.731$) is stronger, but it requires $O(2^N)$ evaluations and hill-climb operations---infeasible beyond $N\!\approx\!25$.
-Mean ORC at $R$ sampled optima costs only~$O(R k^4)$, feasible at any scale.
-Among tractable metrics, \textbf{Mean ORC is the strongest predictor across all three targets}.
-
-\item \textbf{Mean ORC is consistently strong and sign-stable} across all three targets (HC, EA, RS), while classical metrics show inconsistent behavior.
-Information content $H$ correlates \emph{negatively} with HC success but \emph{positively} with EA success, making it unreliable as a standalone predictor.
-FDC has near-zero correlation with RS performance.
-
-\item \textbf{\%Rand$\to$better} is itself a strong predictor ($\rho = {-}0.659$ for HC success, $\rho = {-}0.552$ for RS fitness), confirming that inter-basin transition probability is an important landscape property.
-ORC's contribution is providing \emph{directional} information that significantly improves over random selection.
-\end{enumerate}
-
-\subsection{Comparison with Random-Interaction NK Landscapes}
+\subsection{Scaling Across Problem Sizes and Search Spaces}
+\label{sec:scaling}
 
 \begin{table}[t]
-\caption{Adjacent vs.\ random interaction NK landscapes ($N\!=\!16$). The ORC advantage is consistent across interaction models, though the random model produces fewer local optima at equal $K$.}
-\label{tab:interaction}
+\caption{ORC escape advantage on random MAX-SAT. The ORC/Random ratio \emph{increases} with $N$: ORC's distributional signal becomes more valuable in higher dimensions. 20 instances per cell; $\alpha_c \approx 4.27$ is the satisfiability phase transition.}
+\label{tab:maxsat}
 \centering
 \small
-\begin{tabular}{@{}llrrrr@{}}
+\begin{tabular}{@{}rr|rrr|rr|r@{}}
 \toprule
-$K$ & \textbf{Model} & \textbf{\#Opt.} & \textbf{\%ORC} & \textbf{\%Rand} & \textbf{Adv.} \\
+$N$ & $\alpha$ & \textbf{\%ORC} & \textbf{\%Rand} & \textbf{\%MG} & \textbf{ORC/R} & \textbf{ORC/MG} & \textbf{Mean ORC} \\
 \midrule
-2   & adjacent & 31   & 46.4 & 22.5 & 2.1$\times$ \\
-2   & random   & 24   & 42.8 & 20.3 & 2.1$\times$ \\
+ 20 & 3.00 & 34.3 & 13.5 & 26.1 & 2.5$\times$ & 1.3$\times$ & $-$0.428 \\
+ 20 & 4.27 & 42.7 & 17.5 & 36.7 & 2.4$\times$ & 1.2$\times$ & $-$0.374 \\
+ 20 & 6.00 & 50.0 & 20.1 & 46.3 & 2.5$\times$ & 1.1$\times$ & $-$0.320 \\
 \midrule
-6   & adjacent & 463  & 59.4 & 33.1 & 1.8$\times$ \\
-6   & random   & 364  & 56.6 & 26.8 & 2.1$\times$ \\
+ 50 & 3.00 & 32.8 & 10.1 & 21.9 & 3.3$\times$ & 1.5$\times$ & $-$0.493 \\
+ 50 & 4.27 & 37.3 & 10.6 & 31.3 & 3.5$\times$ & 1.2$\times$ & $-$0.418 \\
+ 50 & 6.00 & 40.4 & 10.3 & 38.1 & 3.9$\times$ & 1.1$\times$ & $-$0.353 \\
 \midrule
-12  & adjacent & 2249 & 51.1 & 37.6 & 1.4$\times$ \\
-12  & random   & 2176 & 51.0 & 37.3 & 1.4$\times$ \\
+100 & 3.00 & 34.0 &  9.9 & 21.4 & 3.4$\times$ & 1.6$\times$ & $-$0.524 \\
+100 & 4.27 & 39.5 & 10.7 & 32.0 & 3.7$\times$ & 1.2$\times$ & $-$0.450 \\
+100 & 6.00 & 42.7 & 10.1 & 40.2 & 4.2$\times$ & 1.1$\times$ & $-$0.385 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-To verify that our results are not specific to the adjacent interaction model, Table~\ref{tab:interaction} compares NK landscapes with adjacent and random interaction.
-The ORC advantage is remarkably consistent across models: at $K = 6$, the advantage is 1.8$\times$ (adjacent) vs.\ 2.1$\times$ (random).
-The random model produces slightly fewer local optima at equal $K$ but the same qualitative ORC behavior, confirming the generality of our findings.
+\textbf{MAX-SAT (binary strings).}
+Proposition~\ref{prop:decomposition}'s sort-and-match reduction lowers per-edge ORC cost from $O(k^3)$ to $O(k \log k)$, enabling computation at 500 optima for $N\!=\!100$ in ${\sim}18$\,s.
+The ORC/Random escape ratio increases from $2.5\times$ at $N\!=\!20$ to $3.7\times$ at $N\!=\!100$ ($\alpha\!=\!4.27$; $\rho(N, \text{ORC/Rand}) = 0.77$, $p < 10^{-84}$).
+As $N$ grows, the $(N\!-\!1)$ exclusive-neighbor comparisons carry more distributional information, strengthening the cross-basin signal.
+Mean ORC also tracks the SAT phase transition: $\rho(\text{ORC}, \alpha) = 0.94$ ($N\!=\!20$), $0.99$ ($N\!=\!100$).
 
-\subsection{ORC Reveals Structure Invisible to Classical Metrics}
+\begin{table}[t]
+\caption{OTG vs.\ LON-d1 on QAP (swap neighborhood, full enumeration). ORC's advantage grows with $n$. LON-d1 degrades to 100\% singletons at $n\!=\!9$. 20 instances per row.}
+\label{tab:qap}
+\centering
+\small
+\begin{tabular}{@{}rrrr|rr|rr|rr@{}}
+\toprule
+& & & & \multicolumn{2}{c|}{\textbf{Escape rate}} & \multicolumn{2}{c|}{\textbf{Mean rank}} & \multicolumn{2}{c}{\textbf{Compression}} \\
+$n$ & $k$ & \textbf{\#Opt} & \textbf{ORC/R} & \textbf{ORC} & \textbf{LON} & \textbf{OTG} & \textbf{LON} & \textbf{OTG} & \textbf{LON} \\
+\midrule
+6  & 15 &   12 & 1.8$\times$ & 51.2 &  4.3 & .230 & .466 & 49\% & 96\% \\
+7  & 21 &   27 & 2.1$\times$ & 55.9 &  3.0 & .235 & .476 & 44\% & 97\% \\
+8  & 28 &   78 & 2.3$\times$ & 58.7 &  0.9 & .230 & .493 & 41\% & 99\% \\
+9  & 36 &  233 & \textbf{2.7$\times$} & 65.0 &  0.1 & \textbf{.194} & .499 & 35\% & \textbf{100\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-Unlike FDC and autocorrelation, which produce a single number per instance, ORC provides \emph{per-local-optimum} directional information: which neighbor leads out of the current basin, how strongly each direction diverges, and the heterogeneity of escape difficulty across optima.
-By recording which optimum each negative-ORC direction leads to, one can construct an \emph{ORC transition graph}---a deterministic, curvature-weighted analogue of stochastic LON transition edges.
+\textbf{QAP (permutations).}
+LON-d1 degrades to 0.1\% escape at $n\!=\!9$ (100\% singletons, rank $\approx$ random); OTG improves: ORC/Random $1.8\times \to 2.7\times$, rank $0.194$ with 35\% compression.
+ORC's advantage over MinGap is modest ($1.06\times$) on these random instances; the primary result is OTG vs.\ LON-d1.
+
+\begin{table}[t]
+\caption{ORC escape on TSP 2-opt across scales. Top rows: full enumeration. Bottom rows: sampling-based (300 restarts per instance). The ORC/Random ratio grows monotonically from $3.1\times$ at $n\!=\!8$ to $18.3\times$ at $n\!=\!50$. When ORC and MinGap disagree, ORC wins 45--52\% vs.\ MinGap's 9--22\%.}
+\label{tab:tsp}
+\centering
+\small
+\begin{tabular}{@{}rrr|rrr|rr@{}}
+\toprule
+& & & \multicolumn{3}{c|}{\textbf{Escape rate (\%)}} & & \\
+$n$ & $k$ & \textbf{\#Opt} & \textbf{ORC} & \textbf{MG} & \textbf{Rand} & \textbf{ORC/R} & \textbf{ORC/MG} \\
+\midrule
+\multicolumn{8}{@{}l}{\emph{Full enumeration}} \\
+ 8 & 20 &    4 & 77.5 & 66.7 & 25.0 & 3.1$\times$ & 1.16$\times$ \\
+ 9 & 27 &    5 & 64.7 & 57.5 & 21.1 & 3.1$\times$ & 1.13$\times$ \\
+10 & 35 &    7 & 68.9 & 62.6 & 21.3 & 3.2$\times$ & 1.10$\times$ \\
+\midrule
+\multicolumn{8}{@{}l}{\emph{Sampling-based (300 restarts)}} \\
+15 &  90 &  225 & 40.0 & 35.4 &  5.2 & 7.7$\times$ & 1.13$\times$ \\
+20 & 170 &  289 & 35.7 & 32.9 &  3.9 & 9.2$\times$ & 1.09$\times$ \\
+30 & 405 &  300 & 40.7 & 38.7 &  3.2 & 12.7$\times$ & 1.05$\times$ \\
+50 &1175 &  300 & 45.0 & 43.5 &  2.5 & 18.3$\times$ & 1.03$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{TSP (2-opt).}
+Table~\ref{tab:tsp} confirms Corollary~\ref{cor:search_spaces}(iii): the disjoint-neighborhood property holds at all tested sizes.
+As $k$ grows from 20 to 1175, random escape drops from 25\% to 2.5\% while ORC maintains 40--45\%, yielding an ORC/Random ratio that grows monotonically ($\rho(k, \text{ORC/Rand}) > 0.99$).
+ORC also consistently outperforms MinGap, winning 45--52\% of disagreements vs.\ 9--22\%.
+This pattern---growing ORC/Random advantage, stable ORC escape rate---is consistent across all three search spaces, confirming that ORC's distributional matching becomes more valuable as neighborhood size increases.
+
+\subsection{ORC-Guided Iterated Local Search}
+\label{sec:ils}
+
+\begin{table}[t]
+\caption{Fixed-budget ILS comparison at $N\!=\!16$ (5{,}000 FEs, 30 instances $\times$ 30 trials). ORC+Pert and Rand-ILS both flip 3 bits per perturbation; ORC-ILS and MG-ILS flip only 1 directed bit (ablations). Bold: best per row.}
+\label{tab:ils}
+\centering
+\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+\textbf{Config} & \textbf{ORC+Pert} & \textbf{Rand-ILS} & \textbf{RR-HC} & \textbf{ORC-ILS} & \textbf{MG-ILS} \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Success rate (\% finding global optimum)}} \\
+\midrule
+NK $K\!=\!4$     & 77.3 & \textbf{88.9} & 88.4 & 6.7 & 6.1 \\
+NK $K\!=\!8$     & 42.0 & \textbf{44.9} & 45.2 & 1.3 & 1.3 \\
+W $\nu\!=\!3$    & 46.7 & \textbf{80.2} & 52.2 & 8.4 & 1.8 \\
+W $\nu\!=\!4$    & \textbf{89.9} & 69.3 & 39.7 & 1.6 & 1.0 \\
+W $\nu\!=\!6$    & \textbf{87.3} & 56.0 & 26.3 & 1.6 & 0.9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:ils} compares ILS variants under a fixed 5{,}000~FE budget.
+ORC+Pert wins on 2 of 5 configurations and loses on 3, partitioning cleanly along OTG topology.
+In the \emph{acyclic regime} (NK, W $\nu\!=\!3$), Rand-ILS dominates---sometimes by large margins (80.2\% vs.\ 46.7\% on W $\nu\!=\!3$)---because the landscape has clear funnel structure and ORC's directional constraint reduces exploration diversity.
+In the \emph{cyclic regime} (W $\nu\!=\!4{,}6$), ORC+Pert dominates: 89.9\% vs.\ 69.3\% at $\nu\!=\!4$.
+ORC-ILS and MG-ILS, which flip only a single directed bit, perform poorly (1--8\% success) because without random bits their perturbation deterministically revisits the same path and becomes trapped in OTG cycles.
+
+\textbf{Computational cost.}
+At $N\!=\!16$, ORC costs ${\sim}$120~FEs (${\sim}$3\,ms); at $N\!=\!100$, ${\sim}$5\,000~FEs (${\sim}$18\,ms).
+At $N\!=\!100$ on MAX-SAT (10\,s wall-clock budget), Rand-ILS completes $25\times$ more iterations and finds better solutions; ORC's $3.7\times$ per-step advantage cannot overcome the iteration deficit when evaluations cost ${\sim}$0.001\,ms.
+ORC-guided search becomes cost-effective when individual evaluations cost ${\ge}\,1$\,ms (e.g., simulation-based optimization).
 
 
+\FloatBarrier
 % ===================================================================
 \section{Discussion}
 \label{sec:discussion}
 % ===================================================================
 
-\subsection{Why the ORC Advantage Diminishes at High Ruggedness}
+\subsection{OTG Structural Properties}
+\label{sec:phase}
 
-At $K = 15$ (NK) and $\nu = 16$ (W-model), the ORC advantage over random direction nearly vanishes (Table~\ref{tab:orc_summary}).
-This is expected: maximally rugged landscapes ($K = N - 1$) have fitness values that are essentially independent random variables at each solution.
-When there is no exploitable fitness structure, \emph{no} metric can identify productive directions---ORC, FDC, and random direction all converge to the same baseline.
-The persistence of the ORC advantage at intermediate ruggedness ($K = 4{-}8$, $\nu = 3{-}6$) is the practically relevant finding, as real-world problems typically exhibit moderate, not maximal, ruggedness.
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_phase_transition.pdf}
+\caption{OTG structural properties vs.\ ruggedness parameter. Left column: NK landscapes ($K$). Right column: W-model ($\nu$). A structural crossover in cycle structure appears at W $\nu\!=\!4$: multi-node cycles emerge (21\% of optima), DAG depth peaks, and top-5\% reachability drops. NK landscapes show no cycles at any~$K$.}
+\label{fig:phase}
+\end{figure}
 
-\subsection{Sensitivity to $\gamma$}
+Figure~\ref{fig:phase} reveals a structural crossover: at W $\nu\!=\!3$ the OTG is acyclic (91\% top-5\%); at $\nu\!=\!4$, cycles emerge trapping 21\% of optima (top-5\% drops to 74\%).
+NK landscapes show no cycles at any $K$.
+This crossover correlates with the ILS results in Table~\ref{tab:ils}: in acyclic regimes, random perturbation suffices and ORC's directional constraint reduces diversity; in cyclic regimes, ORC+Pert's directed bit breaks cycles that trap random perturbation.
+We note this is an observed correlation on the tested benchmark families; validating it as a predictive criterion on unseen landscape types is an avenue for future work.
 
-The fitness sensitivity parameter $\gamma$ controls the relative weight of fitness differences in the transport cost~\eqref{eq:lifted}.
-To verify that our findings are not an artifact of the specific choice $\gamma = 1$, we repeated the full analysis at $\gamma \in \{0.1, 0.5, 1.0, 2.0\}$ for NK landscapes ($N\!=\!16$, $K \in \{4, 8, 12\}$, 30 instances each).
-The ORC advantage is effectively invariant: \%ORC and the advantage ratio remain constant across all tested $\gamma$ values (e.g., $59.6\%$ vs.\ $31.6\%$ at $K\!=\!4$ for every $\gamma$, giving a stable $1.9\times$ advantage).
-This robustness is explained by Theorem~\ref{thm:negative}: the negative ORC arises primarily from the overlap structure of the neighborhoods (the $\delta$ terms), not from the fitness-difference terms ($\gamma\,|f(a)\!-\!f(b)|$).
-Since the overlap structure is a graph-topological property independent of $\gamma$, the curvature sign and the resulting escape-direction ranking are insensitive to the choice of $\gamma$.
+\subsection{ORC as Difficulty Predictor}
+\label{sec:correlation}
 
-\subsection{Relation to Local Optima Networks}
+\begin{table}[t]
+\caption{Spearman correlations ($\rho$) between landscape metrics and algorithm performance ($N\!=\!16$, 480 instances: 30 each for NK $K \in \{4, 8, 12, 15\}$ and W-model $\nu \in \{1, \ldots, 12\}$). $^{***}$: $p < 0.001$. Best per column in \textbf{bold}. $\dagger$: requires full enumeration. HC: best-improvement hill climbing (success = global optimum found). EA: ($\mu$+$\lambda$) evolutionary algorithm with $\mu\!=\!5$, $\lambda\!=\!10$, bit-flip mutation (success rate). RS: random sampling baseline (mean fitness of $10^4$ uniform samples).}
+\label{tab:correlation}
+\centering
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Feature} & \textbf{Cost} & \textbf{HC succ.} & \textbf{EA succ.} & \textbf{RS mean} \\
+\midrule
+Mean ORC (ours)            & $O(Rk^2)$ & $-0.670^{***}$ & $\mathbf{-0.652}^{***}$ & $-0.455^{***}$ \\
+\%ORC$\to$better           & $O(Rk^2)$ & $-0.435^{***}$ & $-0.174^{***}$ & $-0.615^{***}$ \\
+\midrule
+FDC                        & $O(2^N)$  & $0.276^{***}$  & $0.501^{***}$  & $0.024$        \\
+Autocorrelation            & $O(L)$    & $0.543^{***}$  & $0.544^{***}$  & $0.372^{***}$  \\
+Info.\ content $H$         & $O(L)$    & $-0.308^{***}$ & $0.306^{***}$  & $-0.585^{***}$ \\
+Mean $|\Delta f|$ (ELA)    & $O(L)$    & $\mathbf{-0.695}^{***}$ & $-0.083$       & $\mathbf{-0.769}^{***}$ \\
+NBC mean (ELA)             & $O(L)$    & $-0.419^{***}$ & $0.072$        & $-0.487^{***}$ \\
+Basin entropy$^\dagger$    & $O(2^N)$  & $-0.731^{***}$ & $-0.460^{***}$ & $-0.610^{***}$ \\
+\midrule
+OTG attractor rank$^\dagger$ & $O(2^N)$ & $0.636^{***}$ & $0.157$  & $0.754^{***}$ \\
+OTG compression$^\dagger$   & $O(2^N)$ & $0.589^{***}$ & $-0.094$ & $0.748^{***}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-Our ORC transition graph shares structural similarities with LONs~\cite{ochoa2008first,ochoa2017understanding}, but LON edges are discovered via stochastic perturbation-climb cycles capturing \emph{reachability}, whereas ORC edges are computed deterministically and capture \emph{geometric preference}.
-Combining both views---using ORC to weight LON edges---is a promising direction for future work.
+Table~\ref{tab:correlation} evaluates ORC as a difficulty predictor alongside classical FLA metrics.
+Mean $|\Delta f|$ achieves the strongest individual correlation on HC ($\rho = -0.695$) and RS ($\rho = -0.769$), but fails on EA ($\rho = -0.083$, not significant).
+Information content and NBC show similar target-specificity, with sign reversals across algorithm types.
+Autocorrelation maintains consistent sign but with weaker magnitude on RS ($\rho = 0.372$).
+Mean ORC is the only tractable metric with strong correlations (all $|\rho| > 0.45$) of consistent sign across all three algorithm types, making it a robust general-purpose predictor that does not require choosing the right metric for a specific algorithm family.
 
-\subsection{Practical Implications for Algorithm Design}
+\begin{table}[!htb]
+\caption{ORC escape at $N\!=\!20$ (NK landscapes, full enumeration, 10 instances each). The ORC/Random advantage replicates the $N\!=\!16$ pattern; at $K\!=\!19$ (${\approx}N$), all neighbors are equally rugged and ORC's advantage vanishes.}
+\label{tab:n20}
+\centering
+\small
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+$K$ & \textbf{\#Opt} & \textbf{\%ORC} & \textbf{\%Rand} & \textbf{ORC/R} \\
+\midrule
+ 4  &    557 & 62.3 & 31.2 & 2.0$\times$ \\
+ 8  &  5{,}012 & 62.5 & 34.1 & 1.8$\times$ \\
+15  & 26{,}086 & 52.9 & 37.2 & 1.4$\times$ \\
+19  & 49{,}966 & 49.5 & 47.5 & 1.0$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-Our results suggest two immediate applications:
-\begin{enumerate}
-\item \textbf{ORC-guided escape.} At a local optimum, following the min-ORC direction leads to improvement $1.4{-}2.7\times$ more often than following a random neighbor (Table~\ref{tab:orc_summary}).
-Since the min-ORC direction is deterministic, a multi-step ORC-guided search should randomize among \emph{all} negative-ORC directions (not just the minimum) to avoid cycling.
-\item \textbf{ORC as an algorithm selection feature.} Mean ORC at sampled local optima ($\rho = {-}0.670$ with HC success) provides a strong, computationally tractable predictor of hill-climbing difficulty, complementing existing ELA features.
-\end{enumerate}
+Table~\ref{tab:n20} extends the escape analysis to $N\!=\!20$, confirming the pattern beyond the $N\!=\!16$ regime: ORC's advantage decreases monotonically with $K/N$ as maximal-ruggedness landscapes leave no exploitable distributional structure.
+
+\subsection{OTG Visualization}
+\label{sec:otg}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.75\textwidth]{figures/fig_otg_visualization.pdf}
+\caption{OTG for a W-model instance ($N\!=\!16$, $\nu\!=\!3$, seed~0). Each node is a local optimum, sized by basin of attraction and colored by funnel membership. The gold star marks the global optimum. Edges follow the min-ORC direction deterministically. The 406 optima collapse into 69 funnels; 91\% converge to a top-5\% attractor. The circular layout groups funnels; spatial distance does not encode fitness or Hamming distance.}
+\label{fig:otg}
+\end{figure}
+
+Figure~\ref{fig:otg} visualizes the OTG for a representative W-model instance.
+Clusters of optima flow deterministically toward high-quality attractors from local curvature alone, without stochastic trials or perturbation distance choices.
+
+\subsection{Convergence Under Sampling}
+\label{sec:convergence}
+
+On W-model at $N\!=\!16$, subsampling $R$ optima uniformly (20 subsamples $\times$ 10 instances), per-optimum metrics converge fast: escape rate within 2\% error at $R\!=\!5$, $<$1\% at $R\!=\!20$.
+Structural metrics converge slowly---at 50\% coverage, attractor rank is still $3.4\times$ worse than ground truth, because the OTG cannot route to unsampled attractors.
+Per-optimum ORC metrics are thus reliable from ${\sim}20$ restarts at any scale; full OTG structural analysis remains limited to enumerable landscapes.
 
 \subsection{Limitations}
+\label{sec:limitations}
 
-\textbf{Scale and neighborhood size.}
-Full landscape enumeration is feasible at $N\!=\!20$ (${\sim}60$\,s) but not beyond; a sampling-based approach computing ORC at optima found by repeated hill climbing suffices for larger~$N$, since the per-optimum cost is~$O(k^4)$.
-For $k \gg 100$, subsampling the support distributions would be needed.
+The strongest OTG results (up to $9.2\times$ attractor quality improvement over LON-d1) come from full enumeration at $N\!=\!16$ on W-model---a scale where exhaustive analysis is feasible but not representative of real-world problem sizes.
+At $N\!=\!100$ on MAX-SAT, Rand-ILS outperforms ORC+Pert in wall-clock time when evaluations are cheap ($\ll$1\,ms).
+On QAP, ORC's advantage over MinGap is marginal ($1.06\times$) on random instances; structured QAPLIB instances may behave differently.
+For neighborhoods \emph{without} the disjoint-neighborhood property (e.g., 3-opt, LK moves), Proposition~\ref{prop:decomposition}'s decomposition does not apply and ORC requires the full $O(k^3)$ Hungarian algorithm; characterizing ORC's behavior on such graphs is an open question.
+A full comparison with the flacco/ELA ecosystem~\cite{mersmann2011exploratory} in an algorithm selection pipeline remains future work.
 
-\textbf{Graph structure.} Theorem~\ref{thm:negative} assumes the binary hypercube ($N \ge 4$) where adjacent nodes share no common neighbors; it extends to any $k$-regular graph with disjoint exclusive neighborhoods, verified on NAS-Bench-201 ($k\!=\!24$).
-Extending the result to plateaus remains open, though negative ORC is observed at all local optima empirically.
 
-
+\FloatBarrier
 % ===================================================================
 \section{Conclusion}
 \label{sec:conclusion}
 % ===================================================================
 
-We have introduced Ollivier--Ricci curvature as a landscape metric for discrete combinatorial optimization.
-Our main finding is that the most-negative-ORC direction at a local optimum leads to a better basin $1.4{-}2.7\times$ more often than a random direction, across 530+ benchmark instances spanning NK landscapes, the W-model, and NAS-Bench-201.
-This advantage is supported by a rigorous theoretical guarantee---an explicit sufficient condition for negative ORC (Theorem~\ref{thm:negative}) satisfied at 100\% of tested optima---and holds at both $N\!=\!16$ and $N\!=\!20$ scales.
+The ORC Transition Graph demonstrates that optimal transport over neighborhood fitness distributions captures cross-basin structure invisible to 1-hop methods, with the attractor quality gap over LON-d1 reaching up to $9.2\times$ on epistatic W-model landscapes at $N\!=\!16$.
+The disjoint-neighborhood property (Corollary~\ref{cor:search_spaces}) gives the framework a unified foundation across the three foundational neighborhoods in combinatorial optimization: bit-flips, permutation swaps, and TSP 2-opt.
+ORC's per-step escape advantage grows monotonically with neighborhood size ($3.1\times$ to $18.3\times$ over random on TSP from $n\!=\!8$ to $n\!=\!50$; analogous trends on binary and swap spaces), though translating this into algorithmic gains remains cost-dependent.
+OTG structural properties---particularly the acyclic-to-cyclic crossover---correlate with when ORC-guided perturbation adds value in ILS, providing practitioners with a diagnostic signal.
+Per-optimum metrics converge from ${\sim}20$ samples, making ORC a practical addition to the FLA toolkit.
 
-ORC offers three capabilities absent from existing metrics:
-(1)~per-optimum \emph{directional} escape information;
-(2)~a \emph{geometric} account of basin connectivity via optimal transport;
-and (3)~strong correlation with algorithm difficulty, surpassing FDC and autocorrelation.
+\paragraph{Reproducibility.} All code and data are available at \url{https://github.com/RobertoWTBW/RiemannianSwarmSurgery}.
 
-Future work includes:
-(a)~integrating ORC into adaptive search operators for practical optimization;
-(b)~developing sampling-based ORC for large-scale landscapes;
-(c)~combining ORC with LON analysis for richer landscape characterization; and
-(d)~extending ORC to permutation and other non-binary search spaces.
+\begin{credits}
+\subsubsection{\ackname}
+This research received no external funding.
 
-\paragraph{Reproducibility.} All code and data are available at \url{[anonymized]}.
-
+\subsubsection{\discintname}
+The author has no competing interests to declare that are relevant to the content of this article.
+\end{credits}
 
 % ===================================================================
 % References
@@ -538,11 +605,8 @@ Future work includes:
 
 \begin{thebibliography}{99}
 
-\bibitem{dong2020bench}
-Dong, X., Yang, Y.: NAS-Bench-201: Extending the scope of reproducible neural architecture search. In: ICLR (2020)
-
-\bibitem{dong2021nats}
-Dong, X., Liu, L., Musber, K., Graves, B., Shivakumar, P., Yang, Y.: NATS-Bench: Benchmarking NAS algorithms for architecture topology and size. IEEE TPAMI \textbf{44}(7), 3634--3646 (2021)
+\bibitem{dasgupta2023computing}
+DasGupta, B., Grigorescu, E., Mukherjee, T.: On computing discretized Ricci curvatures of graphs: Local algorithms and (localized) fine-grained reductions. arXiv:2208.09535 (2023)
 
 \bibitem{jones1995fitness}
 Jones, T., Forrest, S.: Fitness distance correlation as a measure of problem difficulty for genetic algorithms. In: ICGA, pp.~184--192 (1995)
@@ -551,16 +615,25 @@ Jones, T., Forrest, S.: Fitness distance correlation as a measure of problem dif
 Kauffman, S.A.: The Origins of Order: Self-Organization and Selection in Evolution. Oxford University Press (1993)
 
 \bibitem{kerschke2019automated}
-Kerschke, P., Hoos, H.H., Neumann, F., Trautmann, H.: Automated algorithm selection: Survey and perspectives. Evolutionary Computation \textbf{27}(1), 3--45 (2019)
+Kerschke, P., Hoos, H.H., Neumann, F., Trautmann, H.: Automated algorithm selection: Survey and perspectives. Evol.\ Comput.\ \textbf{27}(1), 3--45 (2019)
 
 \bibitem{kuhn1955hungarian}
-Kuhn, H.W.: The Hungarian method for the assignment problem. Naval Research Logistics Quarterly \textbf{2}(1--2), 83--97 (1955)
+Kuhn, H.W.: The Hungarian method for the assignment problem. Naval Research Logistics \textbf{2}(1--2), 83--97 (1955)
+
+\bibitem{lin2011ricci}
+Lin, Y., Lu, L., Yau, S.T.: Ricci curvature of graphs. Tohoku Math.\ J.\ \textbf{63}(4), 605--627 (2011)
+
+\bibitem{lourenco2003ils}
+Louren\c{c}o, H.R., Martin, O.C., St\"utzle, T.: Iterated local search: Framework and applications. In: Handbook of Metaheuristics, pp.~320--353. Springer (2003)
 
 \bibitem{mersmann2011exploratory}
 Mersmann, O., Bischl, B., Trautmann, H., Preuss, M., Weihs, C., Rudolph, G.: Exploratory landscape analysis. In: GECCO, pp.~829--836. ACM (2011)
 
 \bibitem{ni2019community}
-Ni, C.C., Lin, Y.Y., Luo, F., Gao, J.: Community detection on networks with Ricci flow. Scientific Reports \textbf{9}, 9984 (2019)
+Ni, C.C., Lin, Y.Y., Luo, F., Gao, J.: Community detection on networks with Ricci flow. Sci.\ Rep.\ \textbf{9}, 9984 (2019)
+
+\bibitem{ochoa2020maxsat}
+Ochoa, G., Chicano, F., Tomassini, M.: Global landscape structure and the random MAX-SAT phase transition. In: PPSN. LNCS, vol.~12270, pp.~125--138. Springer (2020)
 
 \bibitem{ochoa2008first}
 Ochoa, G., Tomassini, M., V\'erel, S., Darabos, C.: A study of NK landscapes' basins and local optima networks. In: GECCO, pp.~555--562. ACM (2008)
@@ -571,23 +644,35 @@ Ochoa, G., Veerapen, N.: Deconstructing the Big Valley search space hypothesis. 
 \bibitem{ochoa2017understanding}
 Ochoa, G., Veerapen, N., Daolio, F., Tomassini, M.: Understanding phase transitions with local optima networks: Number partitioning as a case study. In: EvoCOP. LNCS, vol.~10197, pp.~233--248. Springer (2017)
 
+\bibitem{ochoa2017funnels}
+Ochoa, G., Herrmann, S., Rothlauf, F.: Communities of local optima as funnels in fitness landscapes. In: GECCO, pp.~377--384. ACM (2017)
+
 \bibitem{ollivier2009ricci}
-Ollivier, Y.: Ricci curvature of Markov chains on metric spaces. Journal of Functional Analysis \textbf{256}(3), 810--864 (2009)
+Ollivier, Y.: Ricci curvature of Markov chains on metric spaces. J.\ Funct.\ Anal.\ \textbf{256}(3), 810--864 (2009)
 
 \bibitem{pitzer2012comprehensive}
 Pitzer, E., Affenzeller, M.: A comprehensive survey on fitness landscape analysis. In: Recent Advances in Intelligent Engineering Systems, pp.~161--191. Springer (2012)
 
+\bibitem{samal2018comparative}
+Samal, A., Sreejith, R.P., Gu, J., Liu, S., Saucan, E., Jost, J.: Comparative analysis of two discretizations of Ricci curvature for complex networks. Sci.\ Rep.\ \textbf{8}, 8650 (2018)
+
 \bibitem{sandhu2015graph}
-Sandhu, R., Georgiou, T., Reznik, E., Zhu, L., Kolesov, I., Senbabaoglu, Y., Tannenbaum, A.: Graph curvature for differentiating cancer networks. Scientific Reports \textbf{5}, 12323 (2015)
+Sandhu, R., et al.: Graph curvature for differentiating cancer networks. Sci.\ Rep.\ \textbf{5}, 12323 (2015)
 
 \bibitem{stadler1996landscapes}
-Stadler, P.F.: Landscapes and their correlation functions. Journal of Mathematical Chemistry \textbf{20}, 1--45 (1996)
+Stadler, P.F.: Landscapes and their correlation functions. J.\ Math.\ Chem.\ \textbf{20}, 1--45 (1996)
+
+\bibitem{thomson2022fractal}
+Thomson, S.L., Ochoa, G., V\'erel, S.: The fractal geometry of fitness landscapes at the local optima level. Nat.\ Comput.\ \textbf{21}(2), 317--333 (2022)
+
+\bibitem{tomassini2022lon}
+Tomassini, M.: A local optima network view of real function fitness landscapes. Entropy \textbf{24}(5), 703 (2022)
 
 \bibitem{topping2022understanding}
 Topping, J., Di~Giovanni, F., Chamberlain, B.P., Dong, X., Bronstein, M.M.: Understanding over-squashing and bottlenecks on graphs via curvature. In: ICLR (2022)
 
 \bibitem{vassilev2000information}
-Vassilev, V.K., Fogarty, T.C., Miller, J.F.: Information characteristics and the structure of landscapes. Evolutionary Computation \textbf{8}(1), 31--60 (2000)
+Vassilev, V.K., Fogarty, T.C., Miller, J.F.: Information characteristics and the structure of landscapes. Evol.\ Comput.\ \textbf{8}(1), 31--60 (2000)
 
 \bibitem{villani2009optimal}
 Villani, C.: Optimal Transport: Old and New. Springer (2009)

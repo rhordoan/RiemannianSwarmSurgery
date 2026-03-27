@@ -1,0 +1,849 @@
+{
+  "NK N=16, K=12": {
+    "Mean ORC|HC success": {
+      "rho": -0.23740248406933548,
+      "pval": 0.06778460265772907,
+      "n": 60
+    },
+    "Mean ORC|EA success": {
+      "rho": -0.3315515327872864,
+      "pval": 0.00965883416446775,
+      "n": 60
+    },
+    "Mean ORC|RS mean fit": {
+      "rho": -0.28363434287302036,
+      "pval": 0.02808320687503288,
+      "n": 60
+    },
+    "FDC|HC success": {
+      "rho": 0.02444628847357916,
+      "pval": 0.8529118500832547,
+      "n": 60
+    },
+    "FDC|EA success": {
+      "rho": -0.011880347004422488,
+      "pval": 0.928214044517311,
+      "n": 60
+    },
+    "FDC|RS mean fit": {
+      "rho": -0.2276743539872187,
+      "pval": 0.08020175777023748,
+      "n": 60
+    },
+    "Autocorr. len|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 60
+    },
+    "Autocorr. len|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 60
+    },
+    "Autocorr. len|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 60
+    },
+    "Info content H|HC success": {
+      "rho": -0.008846430874571452,
+      "pval": 0.9465148586428038,
+      "n": 60
+    },
+    "Info content H|EA success": {
+      "rho": 0.06883612823150677,
+      "pval": 0.6012481238919267,
+      "n": 60
+    },
+    "Info content H|RS mean fit": {
+      "rho": 0.208891358710753,
+      "pval": 0.10921006281475283,
+      "n": 60
+    },
+    "Basin entropy|HC success": {
+      "rho": -0.0964456312382301,
+      "pval": 0.4635213205217882,
+      "n": 60
+    },
+    "Basin entropy|EA success": {
+      "rho": -0.030200041754939518,
+      "pval": 0.8188224370560013,
+      "n": 60
+    },
+    "Basin entropy|RS mean fit": {
+      "rho": -0.20133370380661297,
+      "pval": 0.12293730154110971,
+      "n": 60
+    }
+  },
+  "NK N=16, K=15": {
+    "Mean ORC|HC success": {
+      "rho": -0.29182416374496295,
+      "pval": 0.11764158178042103,
+      "n": 30
+    },
+    "Mean ORC|EA success": {
+      "rho": -0.2038146434470146,
+      "pval": 0.28001146112884684,
+      "n": 30
+    },
+    "Mean ORC|RS mean fit": {
+      "rho": -0.019799777530589546,
+      "pval": 0.9172886297292692,
+      "n": 30
+    },
+    "FDC|HC success": {
+      "rho": 0.06352945772991363,
+      "pval": 0.7387442604808842,
+      "n": 30
+    },
+    "FDC|EA success": {
+      "rho": 0.289631335424705,
+      "pval": 0.12055276081157162,
+      "n": 30
+    },
+    "FDC|RS mean fit": {
+      "rho": 0.2502780867630701,
+      "pval": 0.1822281136018387,
+      "n": 30
+    },
+    "Autocorr. len|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Info content H|HC success": {
+      "rho": 0.3416422277202189,
+      "pval": 0.06463402025677008,
+      "n": 30
+    },
+    "Info content H|EA success": {
+      "rho": -0.289631335424705,
+      "pval": 0.12055276081157162,
+      "n": 30
+    },
+    "Info content H|RS mean fit": {
+      "rho": 0.0135706340378198,
+      "pval": 0.943259139365723,
+      "n": 30
+    },
+    "Basin entropy|HC success": {
+      "rho": 0.1505968080719895,
+      "pval": 0.42699213659578905,
+      "n": 30
+    },
+    "Basin entropy|EA success": {
+      "rho": 0.2038146434470146,
+      "pval": 0.28001146112884684,
+      "n": 30
+    },
+    "Basin entropy|RS mean fit": {
+      "rho": -0.1439377085650723,
+      "pval": 0.44794559868903494,
+      "n": 30
+    }
+  },
+  "NK N=16, K=2": {
+    "Mean ORC|HC success": {
+      "rho": -0.2279921737418348,
+      "pval": 0.07976946612973898,
+      "n": 60
+    },
+    "Mean ORC|EA success": {
+      "rho": 0.1112065868035062,
+      "pval": 0.3976028112012,
+      "n": 60
+    },
+    "Mean ORC|RS mean fit": {
+      "rho": -0.6085579327591,
+      "pval": 2.4917991347965153e-07,
+      "n": 60
+    },
+    "FDC|HC success": {
+      "rho": 0.31121074866978793,
+      "pval": 0.015505344334974115,
+      "n": 60
+    },
+    "FDC|EA success": {
+      "rho": 0.373571549748858,
+      "pval": 0.0032816081903694013,
+      "n": 60
+    },
+    "FDC|RS mean fit": {
+      "rho": -0.37693803834398454,
+      "pval": 0.0029908880919633403,
+      "n": 60
+    },
+    "Autocorr. len|HC success": {
+      "rho": 0.012705296946572334,
+      "pval": 0.9232438728587808,
+      "n": 60
+    },
+    "Autocorr. len|EA success": {
+      "rho": -0.05166221148958655,
+      "pval": 0.6950451546096554,
+      "n": 60
+    },
+    "Autocorr. len|RS mean fit": {
+      "rho": -0.14224822824771985,
+      "pval": 0.27827779246683615,
+      "n": 60
+    },
+    "Info content H|HC success": {
+      "rho": 0.3456942865986492,
+      "pval": 0.006822916071537768,
+      "n": 60
+    },
+    "Info content H|EA success": {
+      "rho": 0.35381884943353376,
+      "pval": 0.005548359211003494,
+      "n": 60
+    },
+    "Info content H|RS mean fit": {
+      "rho": -0.195943317588219,
+      "pval": 0.1335032105749532,
+      "n": 60
+    },
+    "Basin entropy|HC success": {
+      "rho": -0.5568582393401449,
+      "pval": 3.825624500930869e-06,
+      "n": 60
+    },
+    "Basin entropy|EA success": {
+      "rho": -0.6842859895959851,
+      "pval": 1.6627330105373635e-09,
+      "n": 60
+    },
+    "Basin entropy|RS mean fit": {
+      "rho": 0.4279522089469298,
+      "pval": 0.0006476077175299218,
+      "n": 60
+    }
+  },
+  "NK N=16, K=4": {
+    "Mean ORC|HC success": {
+      "rho": -0.027889452433348203,
+      "pval": 0.8836891914435967,
+      "n": 30
+    },
+    "Mean ORC|EA success": {
+      "rho": -0.057970138646472075,
+      "pval": 0.7609147809508432,
+      "n": 30
+    },
+    "Mean ORC|RS mean fit": {
+      "rho": -0.24671857619577306,
+      "pval": 0.18873194299723545,
+      "n": 30
+    },
+    "FDC|HC success": {
+      "rho": 0.3806352468103363,
+      "pval": 0.037979198458905926,
+      "n": 30
+    },
+    "FDC|EA success": {
+      "rho": 0.3181456418574241,
+      "pval": 0.08664788614582204,
+      "n": 30
+    },
+    "FDC|RS mean fit": {
+      "rho": -0.01668520578420467,
+      "pval": 0.9302651097406684,
+      "n": 30
+    },
+    "Autocorr. len|HC success": {
+      "rho": 0.13985719237491834,
+      "pval": 0.46105295686430203,
+      "n": 30
+    },
+    "Autocorr. len|EA success": {
+      "rho": -0.055460691634218004,
+      "pval": 0.7709847399040912,
+      "n": 30
+    },
+    "Autocorr. len|RS mean fit": {
+      "rho": -0.13945212446374686,
+      "pval": 0.46236506349638384,
+      "n": 30
+    },
+    "Info content H|HC success": {
+      "rho": -0.02699698995548106,
+      "pval": 0.8873872877917075,
+      "n": 30
+    },
+    "Info content H|EA success": {
+      "rho": -0.20749628991713415,
+      "pval": 0.2712272563351954,
+      "n": 30
+    },
+    "Info content H|RS mean fit": {
+      "rho": 0.09098998887652948,
+      "pval": 0.632514915493978,
+      "n": 30
+    },
+    "Basin entropy|HC success": {
+      "rho": -0.17492264566195995,
+      "pval": 0.3552074135109151,
+      "n": 30
+    },
+    "Basin entropy|EA success": {
+      "rho": -0.3142349579011145,
+      "pval": 0.09080899969565623,
+      "n": 30
+    },
+    "Basin entropy|RS mean fit": {
+      "rho": 0.28898776418242494,
+      "pval": 0.12141718912490894,
+      "n": 30
+    }
+  },
+  "NK N=16, K=6": {
+    "Mean ORC|HC success": {
+      "rho": -0.0629536089331025,
+      "pval": 0.6327547753054619,
+      "n": 60
+    },
+    "Mean ORC|EA success": {
+      "rho": -0.15625922522753896,
+      "pval": 0.23316025895707626,
+      "n": 60
+    },
+    "Mean ORC|RS mean fit": {
+      "rho": -0.23651014170602952,
+      "pval": 0.06885518731660842,
+      "n": 60
+    },
+    "FDC|HC success": {
+      "rho": -0.2694436707428283,
+      "pval": 0.0373542645676719,
+      "n": 60
+    },
+    "FDC|EA success": {
+      "rho": 0.03556040914054475,
+      "pval": 0.7873597624730067,
+      "n": 60
+    },
+    "FDC|RS mean fit": {
+      "rho": 0.14676298971936652,
+      "pval": 0.2631490519728838,
+      "n": 60
+    },
+    "Autocorr. len|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 60
+    },
+    "Autocorr. len|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 60
+    },
+    "Autocorr. len|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 60
+    },
+    "Info content H|HC success": {
+      "rho": 0.14501019018821978,
+      "pval": 0.26895557252012214,
+      "n": 60
+    },
+    "Info content H|EA success": {
+      "rho": 0.13545417257684683,
+      "pval": 0.3021108296527658,
+      "n": 60
+    },
+    "Info content H|RS mean fit": {
+      "rho": -0.1692136704640178,
+      "pval": 0.19618594886879606,
+      "n": 60
+    },
+    "Basin entropy|HC success": {
+      "rho": -0.2740873335925757,
+      "pval": 0.034075479463693145,
+      "n": 60
+    },
+    "Basin entropy|EA success": {
+      "rho": -0.16289913564797265,
+      "pval": 0.2136490049412255,
+      "n": 60
+    },
+    "Basin entropy|RS mean fit": {
+      "rho": 0.3214226173937205,
+      "pval": 0.012273094749952173,
+      "n": 60
+    }
+  },
+  "NK N=16, K=8": {
+    "Mean ORC|HC success": {
+      "rho": 0.016960582667006063,
+      "pval": 0.9291170310284422,
+      "n": 30
+    },
+    "Mean ORC|EA success": {
+      "rho": -0.3376597982022032,
+      "pval": 0.06802055736700588,
+      "n": 30
+    },
+    "Mean ORC|RS mean fit": {
+      "rho": -0.4767519466073415,
+      "pval": 0.007730195604015454,
+      "n": 30
+    },
+    "FDC|HC success": {
+      "rho": 0.2588720512332504,
+      "pval": 0.16717702785019548,
+      "n": 30
+    },
+    "FDC|EA success": {
+      "rho": 0.15254539935268538,
+      "pval": 0.4209645568965824,
+      "n": 30
+    },
+    "FDC|RS mean fit": {
+      "rho": -0.08476084538375972,
+      "pval": 0.6560810771678738,
+      "n": 30
+    },
+    "Autocorr. len|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Info content H|HC success": {
+      "rho": 0.15710855523121403,
+      "pval": 0.4070356651126982,
+      "n": 30
+    },
+    "Info content H|EA success": {
+      "rho": 0.048992683003782164,
+      "pval": 0.7971047696586345,
+      "n": 30
+    },
+    "Info content H|RS mean fit": {
+      "rho": 0.14927697441601778,
+      "pval": 0.4311016308691914,
+      "n": 30
+    },
+    "Basin entropy|HC success": {
+      "rho": -0.1126986085110271,
+      "pval": 0.5532207943409218,
+      "n": 30
+    },
+    "Basin entropy|EA success": {
+      "rho": 0.22742626144369332,
+      "pval": 0.22679694728991925,
+      "n": 30
+    },
+    "Basin entropy|RS mean fit": {
+      "rho": 0.2622914349276974,
+      "pval": 0.1614412820441479,
+      "n": 30
+    }
+  },
+  "W nu=16": {
+    "Mean ORC|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Mean ORC|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Mean ORC|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "FDC|HC success": {
+      "rho": -0.06949994162769152,
+      "pval": 0.7151610442983474,
+      "n": 30
+    },
+    "FDC|EA success": {
+      "rho": -0.2315837183225247,
+      "pval": 0.21818751460751007,
+      "n": 30
+    },
+    "FDC|RS mean fit": {
+      "rho": 0.0776790068415558,
+      "pval": 0.6832705782093017,
+      "n": 30
+    },
+    "Autocorr. len|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Info content H|HC success": {
+      "rho": -0.17837527680554272,
+      "pval": 0.34563973583190677,
+      "n": 30
+    },
+    "Info content H|EA success": {
+      "rho": -0.15438914554834976,
+      "pval": 0.41530503032475263,
+      "n": 30
+    },
+    "Info content H|RS mean fit": {
+      "rho": -0.07544685147254557,
+      "pval": 0.6919236858549231,
+      "n": 30
+    },
+    "Basin entropy|HC success": {
+      "rho": 0.0244317200943762,
+      "pval": 0.8980296458351099,
+      "n": 30
+    },
+    "Basin entropy|EA success": {
+      "rho": 0.12351131643867984,
+      "pval": 0.5155301937530121,
+      "n": 30
+    },
+    "Basin entropy|RS mean fit": {
+      "rho": -0.23348345159846945,
+      "pval": 0.21432836683447234,
+      "n": 30
+    }
+  },
+  "W nu=3": {
+    "Mean ORC|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Mean ORC|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Mean ORC|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "FDC|HC success": {
+      "rho": -0.08783643409551779,
+      "pval": 0.644403239171455,
+      "n": 30
+    },
+    "FDC|EA success": {
+      "rho": -0.09654377847490166,
+      "pval": 0.6117962752341775,
+      "n": 30
+    },
+    "FDC|RS mean fit": {
+      "rho": -0.02334549771437249,
+      "pval": 0.902541319404165,
+      "n": 30
+    },
+    "Autocorr. len|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Info content H|HC success": {
+      "rho": 0.06716903783774891,
+      "pval": 0.7243388491651932,
+      "n": 30
+    },
+    "Info content H|EA success": {
+      "rho": 0.11799795146932425,
+      "pval": 0.5345899727932935,
+      "n": 30
+    },
+    "Info content H|RS mean fit": {
+      "rho": -0.09113723146187723,
+      "pval": 0.631961995868268,
+      "n": 30
+    },
+    "Basin entropy|HC success": {
+      "rho": -0.0051668490644422235,
+      "pval": 0.9783818857924679,
+      "n": 30
+    },
+    "Basin entropy|EA success": {
+      "rho": 0.2681771624302824,
+      "pval": 0.151899828422586,
+      "n": 30
+    },
+    "Basin entropy|RS mean fit": {
+      "rho": -0.12548205021475214,
+      "pval": 0.5087992378619182,
+      "n": 30
+    }
+  },
+  "W nu=4": {
+    "Mean ORC|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Mean ORC|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Mean ORC|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "FDC|HC success": {
+      "rho": 0.0032548089729335394,
+      "pval": 0.9863809178691141,
+      "n": 30
+    },
+    "FDC|EA success": {
+      "rho": -0.24633273828226482,
+      "pval": 0.18944652683174296,
+      "n": 30
+    },
+    "FDC|RS mean fit": {
+      "rho": -0.06015955180242142,
+      "pval": 0.7521601643383189,
+      "n": 30
+    },
+    "Autocorr. len|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Info content H|HC success": {
+      "rho": 0.0032548089729335394,
+      "pval": 0.9863809178691141,
+      "n": 30
+    },
+    "Info content H|EA success": {
+      "rho": -0.046952925252696884,
+      "pval": 0.8053882106544514,
+      "n": 30
+    },
+    "Info content H|RS mean fit": {
+      "rho": 0.24063820720968568,
+      "pval": 0.20021272561052528,
+      "n": 30
+    },
+    "Basin entropy|HC success": {
+      "rho": 0.009764426918800619,
+      "pval": 0.9591577534431335,
+      "n": 30
+    },
+    "Basin entropy|EA success": {
+      "rho": -0.26311784199578925,
+      "pval": 0.16007638727183562,
+      "n": 30
+    },
+    "Basin entropy|RS mean fit": {
+      "rho": -0.02446787741217886,
+      "pval": 0.8978795175814069,
+      "n": 30
+    }
+  },
+  "W nu=6": {
+    "Mean ORC|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Mean ORC|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Mean ORC|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "FDC|HC success": {
+      "rho": 0.09493747923001163,
+      "pval": 0.6177594557438401,
+      "n": 30
+    },
+    "FDC|EA success": {
+      "rho": -0.27940316896264117,
+      "pval": 0.13483867717018216,
+      "n": 30
+    },
+    "FDC|RS mean fit": {
+      "rho": 0.15102906399760369,
+      "pval": 0.42565095202313263,
+      "n": 30
+    },
+    "Autocorr. len|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Info content H|HC success": {
+      "rho": -0.24615115096745188,
+      "pval": 0.18978348352279517,
+      "n": 30
+    },
+    "Info content H|EA success": {
+      "rho": 0.13828089040184954,
+      "pval": 0.46617000989089197,
+      "n": 30
+    },
+    "Info content H|RS mean fit": {
+      "rho": 0.027703556117903632,
+      "pval": 0.8844592949949166,
+      "n": 30
+    },
+    "Basin entropy|HC success": {
+      "rho": 0.1040880796377236,
+      "pval": 0.5841181005181432,
+      "n": 30
+    },
+    "Basin entropy|EA success": {
+      "rho": -0.019416152419437775,
+      "pval": 0.9188858990409885,
+      "n": 30
+    },
+    "Basin entropy|RS mean fit": {
+      "rho": -0.14343292764269464,
+      "pval": 0.449556111982956,
+      "n": 30
+    }
+  },
+  "W nu=8": {
+    "Mean ORC|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Mean ORC|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Mean ORC|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "FDC|HC success": {
+      "rho": -0.04372142906834848,
+      "pval": 0.8185533216052484,
+      "n": 30
+    },
+    "FDC|EA success": {
+      "rho": -0.11556551241685709,
+      "pval": 0.5431043881129476,
+      "n": 30
+    },
+    "FDC|RS mean fit": {
+      "rho": -0.1949763635907532,
+      "pval": 0.3018365245512451,
+      "n": 30
+    },
+    "Autocorr. len|HC success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|EA success": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Autocorr. len|RS mean fit": {
+      "rho": 0.0,
+      "pval": 1.0,
+      "n": 30
+    },
+    "Info content H|HC success": {
+      "rho": -0.2904352073826006,
+      "pval": 0.11947942565417789,
+      "n": 30
+    },
+    "Info content H|EA success": {
+      "rho": -0.12524076461919864,
+      "pval": 0.5096209924729396,
+      "n": 30
+    },
+    "Info content H|RS mean fit": {
+      "rho": -0.27091217529849215,
+      "pval": 0.1476069713906446,
+      "n": 30
+    },
+    "Basin entropy|HC success": {
+      "rho": -0.1554272780616564,
+      "pval": 0.4121371963375109,
+      "n": 30
+    },
+    "Basin entropy|EA success": {
+      "rho": 0.3305711169133354,
+      "pval": 0.07438795405136095,
+      "n": 30
+    },
+    "Basin entropy|RS mean fit": {
+      "rho": -0.11301035507092913,
+      "pval": 0.5521165223538751,
+      "n": 30
+    }
+  }
+}
