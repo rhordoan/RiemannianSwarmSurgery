@@ -25,12 +25,12 @@
 
 \begin{abstract}
 We introduce the \emph{ORC Transition Graph}~(OTG), a deterministic directed graph over local optima derived from Ollivier--Ricci curvature~(ORC), as a structural analysis tool for discrete fitness landscapes.
-Each local optimum has exactly one outgoing edge to the optimum reached by following its most-negative-curvature direction and hill-climbing---a purely local, $O(k^2)$ computation.
+Each local optimum has exactly one outgoing edge to the optimum reached by following its most-negative-curvature direction and hill-climbing, requiring only a local $O(k^2)$ computation.
 We study OTG on NK landscapes, epistatic W-model benchmarks ($N\!=\!16$, full enumeration), random MAX-SAT ($N$ up to 100), QAP (permutation swaps, $n$ up to 9), and TSP (2-opt, $n$ up to 50 via sampling).
 The OTG extracts cross-basin information invisible to standard local optima networks~(LONs): using only 1-hop neighborhood data, it achieves up to $9.2\times$ better attractor quality than LON-d1 at equal information cost on epistatic W-model landscapes, and even outperforms the stochastic 3-hop LON-d3 on those instances.
-A structural crossover in OTG topology---from acyclic to cyclic at moderate epistasis---correlates with when ORC-guided perturbation outperforms random perturbation in iterated local search~(ILS).
-The OTG framework applies to any graph with the disjoint-neighborhood property (Proposition~1), which we prove covers binary hypercubes, permutation swap graphs, \emph{and} TSP 2-opt neighborhoods---the three foundational neighborhoods in combinatorial optimization.
-ORC's per-step escape advantage grows monotonically with neighborhood size---from $3.1\times$ to $18.3\times$ over random on TSP ($n\!=\!8$ to $50$)---though its computational cost ($O(k^2)$ per optimum) limits algorithmic use to settings where fitness evaluations are expensive.
+A structural crossover in OTG topology (from acyclic to cyclic at moderate epistasis) correlates with when ORC-guided perturbation outperforms random perturbation in iterated local search~(ILS).
+The OTG framework applies to any graph with the disjoint-neighborhood property (Proposition~1), which we prove covers binary hypercubes, permutation swap graphs, \emph{and} TSP 2-opt neighborhoods, which constitute the three foundational neighborhoods in combinatorial optimization.
+ORC's per-step escape advantage grows monotonically with neighborhood size (from $3.1\times$ to $18.3\times$ over random on TSP, $n\!=\!8$ to $50$), although its computational cost of $O(k^2)$ per optimum limits algorithmic use to settings where fitness evaluations are expensive.
 Per-optimum ORC metrics converge from ${\sim}20$ sampled optima ($<$1\% error), while full OTG structural analysis remains limited to enumerable landscapes.
 \end{abstract}
 
@@ -213,7 +213,7 @@ We evaluate on five benchmark families spanning three search spaces:
 \textbf{NK landscapes}~\cite{kauffman1993origins} define tunably rugged fitness via $K$~epistatic interactions per bit on length-$N$ binary strings.
 We test $K \in \{4, 8, 12\}$ at $N\!=\!16$ (30 instances each, full enumeration).
 
-\textbf{W-model}~\cite{weise2014difficult} applies neutrality, epistasis, and ruggedness transformations controlled by a difficulty parameter $\nu$ to a base OneMax problem.
+\textbf{W-model}~\cite{weise2018wmodel} applies neutrality, epistasis, and ruggedness transformations controlled by a difficulty parameter $\nu$ to a base OneMax problem.
 We test $\nu \in \{3, 4, 6\}$ at $N\!=\!16$ (30 instances each, full enumeration).
 
 \textbf{Random MAX-SAT.}
@@ -628,7 +628,7 @@ Kuhn, H.W.: The Hungarian method for the assignment problem. Naval Research Logi
 Lin, Y., Lu, L., Yau, S.T.: Ricci curvature of graphs. Tohoku Math.\ J.\ \textbf{63}(4), 605--627 (2011)
 
 \bibitem{lourenco2003ils}
-Louren\c{c}o, H.R., Martin, O.C., St\"utzle, T.: Iterated local search: Framework and applications. In: Glover, F., Kochenberger, G.A. (eds.) Handbook of Metaheuristics, pp.~320--353. Springer, Boston (2003)
+Louren\c{c}o, H.R., Martin, O.C., St\"utzle, T.: Iterated local search: Framework and applications. In: Glover, F., Kochenberger, G.A. (eds.) Handbook of Metaheuristics, pp.~320--353. Kluwer Academic Publishers, Boston (2003)
 
 \bibitem{mersmann2011exploratory}
 Mersmann, O., Bischl, B., Trautmann, H., Preuss, M., Weihs, C., Rudolph, G.: Exploratory landscape analysis. In: GECCO, pp.~829--836. ACM, New York (2011)
@@ -681,8 +681,8 @@ Vassilev, V.K., Fogarty, T.C., Miller, J.F.: Information characteristics and the
 \bibitem{villani2009optimal}
 Villani, C.: Optimal Transport: Old and New. Springer, Berlin (2009)
 
-\bibitem{weise2014difficult}
-Weise, T., Wu, Z.: Difficult features of combinatorial optimization problems and algorithm selection with the W-model. In: GECCO Companion, pp.~1453--1460. ACM, New York (2014)
+\bibitem{weise2018wmodel}
+Weise, T., Wu, Z.: Difficult features of combinatorial optimization problems and the tunable W-model benchmark problem for simulating them. In: GECCO Companion, pp.~1769--1776. ACM, New York (2018)
 
 \end{thebibliography}
 
