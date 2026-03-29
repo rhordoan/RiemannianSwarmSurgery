@@ -436,7 +436,7 @@ $n$ & $k$ & \textbf{\#Opt} & \textbf{ORC} & \textbf{MG} & \textbf{Rand} & \textb
 
 \textbf{TSP (2-opt).}
 Table~\ref{tab:tsp} confirms Corollary~\ref{cor:search_spaces}(iii): the disjoint-neighborhood property holds at all tested sizes.
-As $k$ grows from 20 to 1175, random escape drops from 25\% to 2.5\% while ORC maintains 36--45\%, yielding an ORC/Random ratio that grows monotonically ($\rho(k, \text{ORC/Rand}) > 0.99$).
+As $k$ grows from 20 to 1175, random escape drops from 25\% to 2.5\% while ORC maintains 36--45\%, yielding an advantage over Random that grows monotonically ($\rho(k, \text{ORC/Rand}) > 0.99$).
 ORC also consistently outperforms MinGap, winning 45--52\% of disagreements vs.\ 9--22\%.
 This pattern---growing ORC/Random advantage, stable ORC escape rate---is consistent across all three search spaces, confirming that ORC's distributional matching becomes more valuable as neighborhood size increases.
 
