@@ -23,91 +23,63 @@ The framework covers three foundational neighborhoods in combinatorial optimizat
 │   ├── orc_tsp.py              # ORC for TSP 2-opt neighborhoods
 │   ├── nk_landscape.py         # NK landscape generator
 │   ├── wmodel.py               # W-model benchmark generator
-│   ├── landscape_metrics.py    # Classical FLA metrics (FDC, autocorrelation, ELA)
-│   └── ollivier_ricci.py       # Base Ollivier-Ricci implementation
+│   └── landscape_metrics.py    # Classical FLA metrics (FDC, autocorrelation, ELA)
 │
-├── benchmarks/                 # Experiment scripts (paper results)
-│   ├── landscape_analysis_discrete.py   # Main escape rate & correlation analysis
+├── benchmarks/                 # Experiment scripts (reproduce paper results)
+│   ├── landscape_analysis_discrete.py   # Escape rate & correlation analysis
 │   ├── otg_analysis.py                  # OTG vs LON funnel detection
 │   ├── orc_ils.py                       # ILS comparison experiments
-│   ├── maxsat_otg.py                    # MAX-SAT scaling experiments
+│   ├── maxsat_otg.py                    # MAX-SAT experiments
+│   ├── maxsat_otg_scaling.py            # MAX-SAT scaling (N=20,50,100)
 │   ├── qap_otg.py                       # QAP experiments
 │   ├── tsp_2opt_experiment.py           # TSP 2-opt experiments
 │   ├── tsp_2opt_scaling.py              # TSP scaling analysis
-│   └── ela_features.py                  # ELA feature comparison
+│   ├── ela_features.py                  # ELA feature comparison
+│   └── within_k_analysis.py             # Within-K correlation analysis
 │
-├── results/                    # Experimental results (JSON/CSV)
-│   ├── landscape_discrete_v3.json       # NK/W-model escape rates (N=16)
-│   ├── landscape_discrete_n20.json      # NK escape rates (N=20)
-│   ├── otg_analysis_v4.json             # OTG vs LON funnel quality
-│   ├── orc_ils_v3.json                  # ILS comparison results
-│   ├── maxsat_otg_scaling.json          # MAX-SAT results (N=20,50,100)
-│   ├── qap_otg.json                     # QAP results
-│   ├── tsp_2opt_results.json            # TSP enumeration results
-│   └── tsp_2opt_scaling.json            # TSP scaling results
-│
+├── results/                    # Pre-computed experimental results (JSON)
 ├── paper/                      # LaTeX source (Springer LNCS)
-│   ├── main.tex                # Paper source
-│   ├── llncs.cls               # LNCS document class
-│   └── figures/                # Generated figures
-│
-├── tests/                      # Unit tests
-├── requirements.txt            # Python dependencies
-└── README.md                   # This file
+├── archive/                    # Earlier continuous optimization experiments (not used in paper)
+└── requirements.txt            # Python dependencies
 ```
 
-## Installation
+## Quick Start
 
 ```bash
+# 1. Install dependencies
 pip install -r requirements.txt
-```
 
-**Requirements:** Python ≥ 3.10, NumPy, SciPy, NetworkX, Matplotlib, scikit-learn, IOHexperimenter.
+# 2. Quick smoke test — runs a small NK landscape (~10 seconds)
+python3 -c "
+from src.nk_landscape import NKLandscape
+from src.orc_discrete import full_landscape_analysis
+nk = NKLandscape(N=10, K=2, seed=42)
+result = full_landscape_analysis(nk.space_size, nk.fitness, nk.neighbor_fn)
+print(f'Search space: 2^10 = {nk.space_size} solutions')
+print(f'Local optima: {result[\"n_local_optima\"]}')
+print(f'ORC escape success: {result[\"frac_leads_to_better\"]:.1%}')
+print('Setup OK!')
+"
+
+# 3. Run a fast experiment (NK landscape, N=16, K=4 — ~2 minutes)
+python3 benchmarks/landscape_analysis_discrete.py --N 16 --K 4 --instances 2
+```
 
 ## Reproducing Paper Results
 
-Each experiment script in `benchmarks/` is self-contained and writes results to `results/`.
+Each benchmark script writes results to `results/`. Pre-computed outputs are
+included so figures can be regenerated without re-running experiments.
 
-### Table 1 & 6: Escape rates and correlation analysis (N=16)
-```bash
-python benchmarks/landscape_analysis_discrete.py
-```
-
-### Table 2: OTG vs LON funnel quality
-```bash
-python benchmarks/otg_analysis.py
-```
-
-### Table 3: MAX-SAT scaling (N=20, 50, 100)
-```bash
-python benchmarks/maxsat_otg.py
-```
-
-### Table 4: QAP experiments
-```bash
-python benchmarks/qap_otg.py
-```
-
-### Table 5: TSP 2-opt experiments
-```bash
-python benchmarks/tsp_2opt_experiment.py    # Full enumeration (n=8,9,10)
-python benchmarks/tsp_2opt_scaling.py       # Scaling (n=15,20,30,50)
-```
-
-### Table 6 (ILS comparison)
-```bash
-python benchmarks/orc_ils.py
-```
-
-### Table 7: N=20 escape rates
-```bash
-python benchmarks/landscape_analysis_discrete.py  # Includes N=20 configurations
-```
-
-### Figures
-```bash
-python paper/generate_new_figures.py
-```
+| Paper Section | Command | Runtime |
+|---|---|---|
+| Tables 1 & 6 — Escape rates (N=16) | `python benchmarks/landscape_analysis_discrete.py` | ~30 min |
+| Table 2 — OTG vs LON funnels | `python benchmarks/otg_analysis.py` | ~20 min |
+| Table 3 — MAX-SAT scaling | `python benchmarks/maxsat_otg.py` | ~15 min |
+| Table 4 — QAP | `python benchmarks/qap_otg.py` | ~10 min |
+| Table 5 — TSP 2-opt | `python benchmarks/tsp_2opt_experiment.py` | ~10 min |
+| Table 5 — TSP scaling | `python benchmarks/tsp_2opt_scaling.py` | ~20 min |
+| ILS comparison | `python benchmarks/orc_ils.py` | ~15 min |
+| Figures 1 & 2 | `python paper/generate_new_figures.py` | ~1 min |
 
 ## Citation
 

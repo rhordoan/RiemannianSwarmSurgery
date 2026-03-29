@@ -16,7 +16,7 @@
 \title{Ollivier--Ricci Curvature as a Landscape Analysis\\Framework for Discrete Combinatorial Optimization}
 \titlerunning{ORC as a Landscape Analysis Framework}
 
-\author{Roberto Sergiu Hordoan\orcidID{0000-0000-0000-0000}}
+\author{Roberto Sergiu Hordoan\orcidID{0009-0004-5150-6594}}
 \authorrunning{R.S. Hordoan}
 \institute{Babe\c{s}--Bolyai University, Cluj-Napoca, Romania\\
 \email{roberto.hordoan@stud.ubbcluj.ro}}
@@ -69,8 +69,8 @@ On epistatic binary landscapes, the OTG achieves up to $9.2\times$ better attrac
 
 A \emph{fitness landscape} $(S, \mathcal{N}, f)$ consists of solutions $S$, neighborhood function $\mathcal{N}\!: S \to 2^S$, and fitness $f\!: S \to \mathbb{R}$~\cite{stadler1996landscapes}.
 A solution $x^*$ is a \emph{local optimum} (minimization) if $f(x^*) \le f(y)$ for all $y \in \mathcal{N}(x^*)$.
-LONs~\cite{ochoa2008first,ochoa2014local} compress the landscape into a graph whose nodes are local optima and whose edges encode transitions discovered by perturbing a solution (flipping $d$ random bits) and hill-climbing.
-LON features---including funnel structure~\cite{ochoa2017funnels}, fractal dimension~\cite{thomson2022fractal}, and phase-transition indicators~\cite{ochoa2020maxsat}---predict search difficulty~\cite{ochoa2017understanding}, but edge construction requires $T$ stochastic trials per optimum (typically $T\!\ge\!50$) and the resulting funnel decomposition depends on~$d$.
+LONs~\cite{ochoa2008first,ochoa2016local} compress the landscape into a graph whose nodes are local optima and whose edges encode transitions discovered by perturbing a solution (flipping $d$ random bits) and hill-climbing.
+LON features---including funnel structure~\cite{ochoa2016funnels}, fractal dimension~\cite{thomson2022fractal}, and phase-transition indicators~\cite{ochoa2020maxsat}---predict search difficulty~\cite{ochoa2017understanding}, but edge construction requires $T$ stochastic trials per optimum (typically $T\!\ge\!50$) and the resulting funnel decomposition depends on~$d$.
 
 Ollivier~\cite{ollivier2009ricci} defined Ricci curvature for metric-measure spaces; Lin et al.~\cite{lin2011ricci} gave a modified graph formulation.
 For a graph edge $(x, y)$:
@@ -347,6 +347,7 @@ W $\nu\!=\!6$  & 5836 & .066 & .221 & \textbf{.011} & 68.5 & 18.3 & \textbf{96.3
 \end{tabular}
 \end{table}
 
+Table~\ref{tab:otg_vs_lon} compares OTG with LON variants.
 Both OTG and LON-d1 use only 1-hop data, making this an equal-information comparison.
 LON-d1 yields 97--98\% singleton funnels; OTG compresses to 13--42\% funnels with substantially better attractor quality.
 On W $\nu\!=\!3$: OTG rank 0.037 vs.\ LON-d1's 0.340 ($9.2\times$ improvement); 90.7\% reach top-5\% vs.\ 23.2\%.
@@ -381,8 +382,9 @@ $N$ & $\alpha$ & \textbf{\%ORC} & \textbf{\%Rand} & \textbf{\%MG} & \textbf{ORC/
 \end{table}
 
 \textbf{MAX-SAT (binary strings).}
+Table~\ref{tab:maxsat} summarizes results.
 Proposition~\ref{prop:decomposition}'s sort-and-match reduction lowers per-edge ORC cost from $O(k^3)$ to $O(k \log k)$, enabling computation at 500 optima for $N\!=\!100$ in ${\sim}18$\,s.
-The ORC/Random escape ratio increases from $2.5\times$ at $N\!=\!20$ to $3.7\times$ at $N\!=\!100$ ($\alpha\!=\!4.27$; $\rho(N, \text{ORC/Rand}) = 0.77$, $p < 10^{-84}$).
+The ORC/Random escape ratio increases from $2.4\times$ at $N\!=\!20$ to $3.7\times$ at $N\!=\!100$ ($\alpha\!=\!4.27$; $\rho(N, \text{ORC/Rand}) = 0.77$, $p < 10^{-84}$).
 As $N$ grows, the $(N\!-\!1)$ exclusive-neighbor comparisons carry more distributional information, strengthening the cross-basin signal.
 Mean ORC also tracks the SAT phase transition: $\rho(\text{ORC}, \alpha) = 0.94$ ($N\!=\!20$), $0.99$ ($N\!=\!100$).
 
@@ -405,7 +407,7 @@ $n$ & $k$ & \textbf{\#Opt} & \textbf{ORC/R} & \textbf{ORC} & \textbf{LON} & \tex
 \end{table}
 
 \textbf{QAP (permutations).}
-LON-d1 degrades to 0.1\% escape at $n\!=\!9$ (100\% singletons, rank $\approx$ random); OTG improves: ORC/Random $1.8\times \to 2.7\times$, rank $0.194$ with 35\% compression.
+Table~\ref{tab:qap} shows that LON-d1 degrades to 0.1\% escape at $n\!=\!9$ (100\% singletons, rank $\approx$ random); OTG improves: ORC/Random $1.8\times \to 2.7\times$, rank $0.194$ with 35\% compression.
 ORC's advantage over MinGap is modest ($1.06\times$) on these random instances; the primary result is OTG vs.\ LON-d1.
 
 \begin{table}[t]
@@ -434,7 +436,7 @@ $n$ & $k$ & \textbf{\#Opt} & \textbf{ORC} & \textbf{MG} & \textbf{Rand} & \textb
 
 \textbf{TSP (2-opt).}
 Table~\ref{tab:tsp} confirms Corollary~\ref{cor:search_spaces}(iii): the disjoint-neighborhood property holds at all tested sizes.
-As $k$ grows from 20 to 1175, random escape drops from 25\% to 2.5\% while ORC maintains 40--45\%, yielding an ORC/Random ratio that grows monotonically ($\rho(k, \text{ORC/Rand}) > 0.99$).
+As $k$ grows from 20 to 1175, random escape drops from 25\% to 2.5\% while ORC maintains 36--45\%, yielding an ORC/Random ratio that grows monotonically ($\rho(k, \text{ORC/Rand}) > 0.99$).
 ORC also consistently outperforms MinGap, winning 45--52\% of disagreements vs.\ 9--22\%.
 This pattern---growing ORC/Random advantage, stable ORC escape rate---is consistent across all three search spaces, confirming that ORC's distributional matching becomes more valuable as neighborhood size increases.
 
@@ -578,6 +580,7 @@ A full comparison with the flacco/ELA ecosystem~\cite{mersmann2011exploratory} i
 
 
 \FloatBarrier
+\enlargethispage{2\baselineskip}
 % ===================================================================
 \section{Conclusion}
 \label{sec:conclusion}
@@ -589,7 +592,8 @@ ORC's per-step escape advantage grows monotonically with neighborhood size ($3.1
 OTG structural properties---particularly the acyclic-to-cyclic crossover---correlate with when ORC-guided perturbation adds value in ILS, providing practitioners with a diagnostic signal.
 Per-optimum metrics converge from ${\sim}20$ samples, making ORC a practical addition to the FLA toolkit.
 
-\paragraph{Reproducibility.} All code and data are available at \url{https://github.com/rhordoan/RiemannianSwarmSurgery}.
+\paragraph{Reproducibility.} All code and data are available at\\
+\url{https://github.com/rhordoan/RiemannianSwarmSurgery}.
 
 \begin{credits}
 \subsubsection{\ackname}
@@ -609,10 +613,10 @@ The author has no competing interests to declare that are relevant to the conten
 DasGupta, B., Grigorescu, E., Mukherjee, T.: On computing discretized Ricci curvatures of graphs: Local algorithms and (localized) fine-grained reductions. arXiv:2208.09535 (2023)
 
 \bibitem{jones1995fitness}
-Jones, T., Forrest, S.: Fitness distance correlation as a measure of problem difficulty for genetic algorithms. In: ICGA, pp.~184--192 (1995)
+Jones, T., Forrest, S.: Fitness distance correlation as a measure of problem difficulty for genetic algorithms. In: Eshelman, L.J. (ed.) 6th International Conference on Genetic Algorithms, pp.~184--192. Morgan Kaufmann, San Francisco (1995)
 
 \bibitem{kauffman1993origins}
-Kauffman, S.A.: The Origins of Order: Self-Organization and Selection in Evolution. Oxford University Press (1993)
+Kauffman, S.A.: The Origins of Order: Self-Organization and Selection in Evolution. Oxford University Press, New York (1993)
 
 \bibitem{kerschke2019automated}
 Kerschke, P., Hoos, H.H., Neumann, F., Trautmann, H.: Automated algorithm selection: Survey and perspectives. Evol.\ Comput.\ \textbf{27}(1), 3--45 (2019)
@@ -624,34 +628,34 @@ Kuhn, H.W.: The Hungarian method for the assignment problem. Naval Research Logi
 Lin, Y., Lu, L., Yau, S.T.: Ricci curvature of graphs. Tohoku Math.\ J.\ \textbf{63}(4), 605--627 (2011)
 
 \bibitem{lourenco2003ils}
-Louren\c{c}o, H.R., Martin, O.C., St\"utzle, T.: Iterated local search: Framework and applications. In: Handbook of Metaheuristics, pp.~320--353. Springer (2003)
+Louren\c{c}o, H.R., Martin, O.C., St\"utzle, T.: Iterated local search: Framework and applications. In: Glover, F., Kochenberger, G.A. (eds.) Handbook of Metaheuristics, pp.~320--353. Springer, Boston (2003)
 
 \bibitem{mersmann2011exploratory}
-Mersmann, O., Bischl, B., Trautmann, H., Preuss, M., Weihs, C., Rudolph, G.: Exploratory landscape analysis. In: GECCO, pp.~829--836. ACM (2011)
+Mersmann, O., Bischl, B., Trautmann, H., Preuss, M., Weihs, C., Rudolph, G.: Exploratory landscape analysis. In: GECCO, pp.~829--836. ACM, New York (2011)
 
 \bibitem{ni2019community}
 Ni, C.C., Lin, Y.Y., Luo, F., Gao, J.: Community detection on networks with Ricci flow. Sci.\ Rep.\ \textbf{9}, 9984 (2019)
 
 \bibitem{ochoa2020maxsat}
-Ochoa, G., Chicano, F., Tomassini, M.: Global landscape structure and the random MAX-SAT phase transition. In: PPSN. LNCS, vol.~12270, pp.~125--138. Springer (2020)
+Ochoa, G., Chicano, F., Tomassini, M.: Global landscape structure and the random MAX-SAT phase transition. In: B\"ack, T., et al. (eds.) PPSN XVI. LNCS, vol.~12270, pp.~125--138. Springer, Cham (2020)
+
+\bibitem{ochoa2016funnels}
+Ochoa, G., Herrmann, S., Rothlauf, F.: Communities of local optima as funnels in fitness landscapes. In: GECCO, pp.~325--331. ACM, New York (2016)
 
 \bibitem{ochoa2008first}
-Ochoa, G., Tomassini, M., V\'erel, S., Darabos, C.: A study of NK landscapes' basins and local optima networks. In: GECCO, pp.~555--562. ACM (2008)
+Ochoa, G., Tomassini, M., V\'erel, S., Darabos, C.: A study of NK landscapes' basins and local optima networks. In: GECCO, pp.~555--562. ACM, New York (2008)
 
-\bibitem{ochoa2014local}
-Ochoa, G., Veerapen, N.: Deconstructing the Big Valley search space hypothesis. In: EvoCOP. LNCS, vol.~8600, pp.~58--69. Springer (2014)
+\bibitem{ochoa2016local}
+Ochoa, G., Veerapen, N.: Deconstructing the Big Valley search space hypothesis. In: Chicano, F., Hu, B., Garc\'ia-S\'anchez, P. (eds.) EvoCOP. LNCS, vol.~9595, pp.~58--73. Springer, Cham (2016)
 
 \bibitem{ochoa2017understanding}
-Ochoa, G., Veerapen, N., Daolio, F., Tomassini, M.: Understanding phase transitions with local optima networks: Number partitioning as a case study. In: EvoCOP. LNCS, vol.~10197, pp.~233--248. Springer (2017)
-
-\bibitem{ochoa2017funnels}
-Ochoa, G., Herrmann, S., Rothlauf, F.: Communities of local optima as funnels in fitness landscapes. In: GECCO, pp.~377--384. ACM (2017)
+Ochoa, G., Veerapen, N., Daolio, F., Tomassini, M.: Understanding phase transitions with local optima networks: Number partitioning as a case study. In: Hu, B., L\'opez-Ib\'a\~nez, M. (eds.) EvoCOP. LNCS, vol.~10197, pp.~233--248. Springer, Cham (2017)
 
 \bibitem{ollivier2009ricci}
 Ollivier, Y.: Ricci curvature of Markov chains on metric spaces. J.\ Funct.\ Anal.\ \textbf{256}(3), 810--864 (2009)
 
 \bibitem{pitzer2012comprehensive}
-Pitzer, E., Affenzeller, M.: A comprehensive survey on fitness landscape analysis. In: Recent Advances in Intelligent Engineering Systems, pp.~161--191. Springer (2012)
+Pitzer, E., Affenzeller, M.: A comprehensive survey on fitness landscape analysis. In: Fodor, J., Klempous, R., Su\'arez Araujo, C.P. (eds.) Recent Advances in Intelligent Engineering Systems. SCI, vol.~378, pp.~161--191. Springer, Heidelberg (2012)
 
 \bibitem{samal2018comparative}
 Samal, A., Sreejith, R.P., Gu, J., Liu, S., Saucan, E., Jost, J.: Comparative analysis of two discretizations of Ricci curvature for complex networks. Sci.\ Rep.\ \textbf{8}, 8650 (2018)
@@ -669,16 +673,16 @@ Thomson, S.L., Ochoa, G., V\'erel, S.: The fractal geometry of fitness landscape
 Tomassini, M.: A local optima network view of real function fitness landscapes. Entropy \textbf{24}(5), 703 (2022)
 
 \bibitem{topping2022understanding}
-Topping, J., Di~Giovanni, F., Chamberlain, B.P., Dong, X., Bronstein, M.M.: Understanding over-squashing and bottlenecks on graphs via curvature. In: ICLR (2022)
+Topping, J., Di~Giovanni, F., Chamberlain, B.P., Dong, X., Bronstein, M.M.: Understanding over-squashing and bottlenecks on graphs via curvature. In: ICLR. OpenReview.net (2022)
 
 \bibitem{vassilev2000information}
 Vassilev, V.K., Fogarty, T.C., Miller, J.F.: Information characteristics and the structure of landscapes. Evol.\ Comput.\ \textbf{8}(1), 31--60 (2000)
 
 \bibitem{villani2009optimal}
-Villani, C.: Optimal Transport: Old and New. Springer (2009)
+Villani, C.: Optimal Transport: Old and New. Springer, Berlin (2009)
 
 \bibitem{weise2014difficult}
-Weise, T., Wu, Z.: Difficult features of combinatorial optimization problems and algorithm selection with the W-model. In: GECCO Companion, pp.~1453--1460. ACM (2014)
+Weise, T., Wu, Z.: Difficult features of combinatorial optimization problems and algorithm selection with the W-model. In: GECCO Companion, pp.~1453--1460. ACM, New York (2014)
 
 \end{thebibliography}
 
